@@ -802,13 +802,78 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {e}")
 
 async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 트렌드 분석 중... (30초)")
-    news   = NewsCollector().collect_news(max_per_feed=5)
-    result = ai.analyze_sector_trend(news)
-    if result:
-        await send(f"📊 <b>섹터 트렌드</b>\n\n{result}")
-    else:
-        await update.message.reply_text("❌ 실패")
+    """실시간 섹터 트렌드 분석 (ETF 자금 흐름 기반)"""
+    await update.message.reply_text("🔍 실시간 섹터 트렌드 분석 중... (30초)")
+    try:
+        # 실시간 market_temperature 실행
+        r       = regime.current_regime
+        context_data = await mt.select_sectors(r.get('regime', '강세'))
+
+        if not context_data:
+            await update.message.reply_text("❌ 분석 실패")
+            return
+
+        ai_result = context_data.get('ai_result', {})
+        macro     = context_data.get('macro', {})
+        etf_flow  = context_data.get('etf_flow', {})
+        kr_temp   = context_data.get('kr_temp', {})
+
+        # 메시지 생성
+        msg  = f"📊 <b>실시간 섹터 트렌드</b> {datetime.now().strftime('%m/%d %H:%M')}\n"
+        msg += f"<i>ETF 자금 흐름 + AI 분석 기반 (방금 분석)</i>\n\n"
+
+        # 장세
+        kr_regime = r.get('kr_regime', '중립')
+        us_regime = r.get('us_regime', '중립')
+        msg += f"🇰🇷 한국: {kr_regime}장 | 🇺🇸 미국: {us_regime}장\n\n"
+
+        # ETF 자금 유입
+        inflow = [(s, d) for s, d in etf_flow.items() if d.get('inflow')]
+        outflow = [(s, d) for s, d in etf_flow.items() if not d.get('inflow') and d.get('change', 0) < -0.5]
+        if inflow:
+            msg += "💰 <b>자금 유입 ETF</b>\n"
+            for sector, data in inflow:
+                msg += f"  ▲ {sector}({data['ticker']}): {data['change']:+.2f}% 거래량{data['vol_ratio']}배\n"
+            msg += "\n"
+        if outflow:
+            msg += "📉 <b>자금 유출 ETF</b>\n"
+            for sector, data in outflow[:3]:
+                msg += f"  ▼ {sector}({data['ticker']}): {data['change']:+.2f}%\n"
+            msg += "\n"
+
+        # 오늘 주력 섹터
+        selected = ai_result.get('selected_sectors', [])
+        if selected:
+            msg += "🎯 <b>오늘 주력 섹터</b>\n"
+            for s in selected:
+                momentum_emoji = {"강함": "🔥", "보통": "✅", "약함": "⚠️"}.get(s.get('momentum', '보통'), "✅")
+                msg += f"  {momentum_emoji} <b>{s['kr_sector']}</b>\n"
+                msg += f"     {s['reason']}\n"
+                if s.get('caution') and s['caution'] != '없음':
+                    msg += f"     ⚠️ {s['caution']}\n"
+            msg += "\n"
+
+        # 다음 올 섹터 (순환 사이클)
+        msg += f"🔄 <b>섹터 순환 예측</b>\n"
+        msg += f"  {ai_result.get('market_outlook', '')}\n\n"
+
+        # 과열 섹터
+        overheated = ai_result.get('overheated_sectors', [])
+        if overheated:
+            msg += f"🌡️ <b>과열 주의</b> (신규 진입 금지)\n"
+            for s in overheated:
+                msg += f"  ❌ {s}\n"
+            msg += "\n"
+
+        # 장세 신뢰도
+        msg += f"📊 장세 신뢰도: {ai_result.get('regime_confidence', '?')}\n"
+        msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        await safe_send_message(update, msg)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ 실패: {e}")
+        print(f"  ❌ cmd_trend 실패: {e}")
 
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🧠 AI 브리핑 생성 중... (30~60초)")
