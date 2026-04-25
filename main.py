@@ -195,6 +195,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📈 <b>종목 분석</b>
 /check 티커 — 즉시 분석
+/analyze 종목명 — 시황+트렌드+AI 종합 분석
 /scan — 전체 신호 스캔
 /supply — 외국인/기관 수급
 /leverage — 레버리지 ETF 현황
@@ -419,6 +420,353 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⏰ {data['timestamp']}"""
     await safe_send_message(update, msg)
+
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /analyze 삼성전자 — 한국 종목명
+    /analyze NVDA — 미국 티커
+    
+    기술적 + 시황 + 트렌드 + AI 종합 예측
+    """
+    if not context.args:
+        await update.message.reply_text(
+            "사용법:\n"
+            "/analyze 삼성전자 — 한국 종목\n"
+            "/analyze NVDA — 미국 종목"
+        )
+        return
+ 
+    query = " ".join(context.args)
+    await update.message.reply_text(f"🔍 {query} 종합 분석 중... (30~40초)")
+ 
+    try:
+        from modules.kis_api import KISApi
+        from modules.sector_db import SECTOR_DB
+        from modules.supply_demand import SupplyDemand
+        from anthropic import Anthropic
+        import yfinance as yf
+        import re, json as _json
+ 
+        kis    = KISApi()
+        client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+ 
+        # ── 1. 종목 식별 ──────────────────────────────
+ 
+        # 미국 티커 판단 (영문자만)
+        is_us_ticker = query.isalpha() and query.isupper() and len(query) <= 5
+ 
+        ticker   = None
+        name     = query
+        market   = None
+        sector   = "알 수 없음"
+ 
+        if is_us_ticker:
+            # 미국 티커 직접 사용
+            ticker = query.upper()
+            market = "US"
+            # sector_db에서 섹터 찾기
+            for sector_name, sector_data in SECTOR_DB.items():
+                if sector_data.get('market') != 'US':
+                    continue
+                for tier in ['대장주', '2등주']:
+                    for sname, sticker in sector_data.get(tier, {}).items():
+                        if sticker == ticker:
+                            name   = sname
+                            sector = sector_name
+                            break
+        else:
+            # 한국 종목명 → 티커 변환
+            # 1차: sector_db에서 검색
+            for sector_name, sector_data in SECTOR_DB.items():
+                if sector_data.get('market') != 'KR':
+                    continue
+                for tier in ['대장주', '2등주', '소부장']:
+                    for sname, sticker in sector_data.get(tier, {}).items():
+                        if query in sname or sname in query:
+                            ticker = sticker
+                            name   = sname
+                            market = "KR"
+                            sector = sector_name
+                            break
+                if ticker:
+                    break
+ 
+            # 2차: AI로 티커 변환
+            if not ticker:
+                res = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=100,
+                    messages=[{"role": "user", "content": f"""한국 주식 종목명을 티커로 변환해주세요.
+종목명: {query}
+JSON으로만: {{"ticker": "000000", "name": "정확한종목명", "sector": "섹터명"}}"""}]
+                )
+                text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
+                m    = re.search(r'\{.*\}', text, re.DOTALL)
+                if m:
+                    info   = _json.loads(m.group())
+                    ticker = info.get('ticker', '')
+                    name   = info.get('name', query)
+                    sector = info.get('sector', '알 수 없음')
+                    market = "KR"
+ 
+        if not ticker:
+            await update.message.reply_text(f"❌ {query} 종목을 찾을 수 없어요")
+            return
+ 
+        # ── 2. 기술적 데이터 수집 ─────────────────────
+ 
+        price_data = {}
+        tech_data  = {}
+ 
+        if market == "KR":
+            kis_data = kis.get_kr_price(ticker)
+            if kis_data:
+                price_data = kis_data
+            yf_ticker = f"{ticker}.KS"
+        else:
+            for excd in ["NAS", "NYS", "AMS"]:
+                us_data = kis.get_us_price(ticker, excd)
+                if us_data and us_data.get('price', 0) > 0:
+                    price_data = us_data
+                    break
+            if not price_data:
+                yf_hist = yf.Ticker(ticker).history(period="2d").dropna()
+                if not yf_hist.empty:
+                    price_data = {
+                        'price':      round(yf_hist['Close'].iloc[-1], 2),
+                        'change_pct': round(((yf_hist['Close'].iloc[-1] - yf_hist['Close'].iloc[-2]) / yf_hist['Close'].iloc[-2]) * 100, 2),
+                    }
+            yf_ticker = ticker
+ 
+        # yfinance 기술적 지표
+        try:
+            hist = yf.Ticker(yf_ticker).history(period="60d").dropna()
+            if len(hist) >= 20:
+                close     = hist['Close']
+                volume    = hist['Volume']
+                current   = price_data.get('price', close.iloc[-1])
+                avg_vol   = volume.mean()
+                curr_vol  = volume.iloc[-1]
+                vol_ratio = round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1
+ 
+                # RSI
+                delta = close.diff()
+                gain  = delta.clip(lower=0).rolling(14).mean()
+                loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                rs    = gain / loss
+                rsi   = round((100 - (100 / (1 + rs))).iloc[-1], 1)
+ 
+                # 이평선
+                ma5  = round(close.rolling(5).mean().iloc[-1], 2)
+                ma20 = round(close.rolling(20).mean().iloc[-1], 2)
+ 
+                # OBV
+                obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
+                obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
+ 
+                # 52주
+                high_52w  = close.max()
+                low_52w   = close.min()
+                drawdown  = round(((current - high_52w) / high_52w) * 100, 1)
+ 
+                tech_data = {
+                    "rsi":       rsi,
+                    "ma5":       ma5,
+                    "ma20":      ma20,
+                    "vol_ratio": vol_ratio,
+                    "obv_trend": obv_trend,
+                    "drawdown":  drawdown,
+                    "high_52w":  round(high_52w, 2),
+                    "low_52w":   round(low_52w, 2),
+                }
+        except Exception as e:
+            print(f"  ⚠️ 기술적 데이터 실패: {e}")
+ 
+        # ── 3. 수급 데이터 (한국만) ───────────────────
+ 
+        supply_text = "수급 데이터 없음"
+        if market == "KR":
+            try:
+                sd          = SupplyDemand()
+                supply      = sd.analyze_supply(ticker, name)
+                if supply:
+                    supply_text = (
+                        f"외국인 {supply['foreign_consecutive']}일 연속 "
+                        f"{'순매수' if supply['foreign'] > 0 else '순매도'} "
+                        f"({supply['foreign']:,}주)\n"
+                        f"기관 {supply['organ_consecutive']}일 연속 "
+                        f"{'순매수' if supply['organ'] > 0 else '순매도'} "
+                        f"({supply['organ']:,}주)"
+                    )
+            except:
+                pass
+ 
+        # ── 4. 시황 컨텍스트 수집 ─────────────────────
+ 
+        # 현재 장세
+        r          = regime.current_regime
+        kr_regime  = r.get('kr_regime', '중립')
+        us_regime  = r.get('us_regime', '중립')
+        cur_regime = kr_regime if market == "KR" else us_regime
+ 
+        # 오늘 AI 선정 섹터
+        mt_context    = mt.get_current_context()
+        selected_sectors = []
+        overheated_sectors = []
+        if mt_context:
+            ai_result         = mt_context.get('ai_result', {})
+            selected_sectors  = [s['kr_sector'] for s in ai_result.get('selected_sectors', [])]
+            overheated_sectors = ai_result.get('overheated_sectors', [])
+ 
+        in_selected  = any(sector.lower() in s.lower() or s.lower() in sector.lower() for s in selected_sectors)
+        is_overheated = any(sector.lower() in s.lower() or s.lower() in sector.lower() for s in overheated_sectors)
+ 
+        # 이벤트 캘린더
+        today_events   = ec.get_today_events()
+        event_text     = ", ".join([e['type'] for e in today_events if e['severity'] in ['high', 'medium']]) or "없음"
+ 
+        # 환율 (미국 주식)
+        fx_text = ""
+        if market == "US":
+            fx_rate   = fx.get_current_rate()
+            fx_trend  = fx.get_5day_trend()
+            fx_text   = f"환율: {fx_rate:,.0f}원 | {fx_trend.get('trend', '횡보') if fx_trend else '횡보'}"
+ 
+        # 포트폴리오 보유 여부
+        holding_text = ""
+        holding_info = pf.portfolio.get(ticker)
+        if holding_info and isinstance(holding_info, dict):
+            buy_price   = holding_info.get('buy_price', 0)
+            current     = price_data.get('price', 0)
+            profit_pct  = ((current - buy_price) / buy_price) * 100 if buy_price > 0 else 0
+            target1     = holding_info.get('target1')
+            stop_loss   = holding_info.get('stop_loss')
+            holding_text = (
+                f"보유 중 | 매수가: {buy_price:,} | 수익률: {profit_pct:+.1f}%\n"
+                f"목표가: {target1:,} | 손절가: {stop_loss:,}"
+            ) if target1 and stop_loss else f"보유 중 | 매수가: {buy_price:,} | 수익률: {profit_pct:+.1f}%"
+ 
+        # ── 5. AI 종합 분석 ───────────────────────────
+ 
+        currency = "$" if market == "US" else "₩"
+        current_price = price_data.get('price', 0)
+        change_pct    = price_data.get('change_pct', 0)
+ 
+        prompt = f"""주식 종합 분석을 해주세요. 뉴스보다 시황/트렌드/수급을 중심으로 판단해주세요.
+ 
+=== 종목 정보 ===
+종목: {name} ({ticker}) | 시장: {market} | 섹터: {sector}
+현재가: {currency}{current_price:,} ({change_pct:+.1f}%)
+{f"보유 현황: {holding_text}" if holding_text else "미보유"}
+ 
+=== 기술적 지표 ===
+RSI: {tech_data.get('rsi', 'N/A')}
+5일선: {tech_data.get('ma5', 'N/A')} | 20일선: {tech_data.get('ma20', 'N/A')}
+거래량: 평균 대비 {tech_data.get('vol_ratio', 1)}배
+OBV: {tech_data.get('obv_trend', 'N/A')}
+52주 고점 대비: {tech_data.get('drawdown', 'N/A')}%
+ 
+=== 수급 ===
+{supply_text}
+ 
+=== 현재 시황 ===
+한국 장세: {kr_regime}장 (점수: {r.get('kr_score', 0)})
+미국 장세: {us_regime}장 (점수: {r.get('us_score', 0)})
+현재 장세: {cur_regime}장
+ 
+=== 오늘 AI 선정 섹터 ===
+선정: {', '.join(selected_sectors) if selected_sectors else '없음'}
+이 종목 섹터 포함 여부: {'✅ 포함' if in_selected else '❌ 미포함'}
+과열 섹터: {', '.join(overheated_sectors) if overheated_sectors else '없음'}
+이 종목 과열 여부: {'🌡️ 과열' if is_overheated else '정상'}
+ 
+=== 이벤트 ===
+오늘 이벤트: {event_text}
+{f"환율: {fx_text}" if fx_text else ""}
+ 
+분석 요청:
+1. 지금 이 종목 타이밍 판단 (뉴스 아닌 시황/트렌드/수급 기반)
+2. {"추가매수/익절/손절 판단" if holding_text else "단기/중장기/도박 중 전략"}
+3. 목표가 / 손절가
+4. 핵심 리스크 1가지
+5. 같은 섹터 더 나은 대안 종목 1~2개 (있을 경우만)
+ 
+한국어로 간결하게, JSON으로만:
+{{
+  "timing": "좋음 or 보통 or 나쁨",
+  "timing_reason": "타이밍 판단 이유 한줄",
+  "strategy": "단기 or 중장기 or 도박 or 추가매수 or 익절고려 or 손절고려",
+  "strategy_reason": "전략 이유 한줄",
+  "target": {current_price * 1.1:.0f},
+  "stop_loss": {current_price * 0.93:.0f},
+  "risk": "핵심 리스크 한줄",
+  "alternatives": ["대안종목1", "대안종목2"],
+  "overall": "한줄 총평"
+}}"""
+ 
+        res = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text   = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
+        m      = re.search(r'\{.*\}', text, re.DOTALL)
+        ai_res = _json.loads(m.group()) if m else {}
+ 
+        # ── 6. 메시지 생성 ────────────────────────────
+ 
+        timing_emoji = {"좋음": "🟢", "보통": "🟡", "나쁨": "🔴"}.get(ai_res.get('timing', '보통'), "🟡")
+        market_flag  = "🇺🇸" if market == "US" else "🇰🇷"
+        sector_badge = "✅ 오늘 선정 섹터" if in_selected else ("🌡️ 과열 주의" if is_overheated else "")
+ 
+        msg  = f"🔍 <b>{name}</b> ({ticker}) {market_flag}\n"
+        msg += f"섹터: {sector} {sector_badge}\n\n"
+ 
+        # 보유 현황
+        if holding_text:
+            msg += f"💼 <b>보유 현황</b>\n{holding_text}\n\n"
+ 
+        # 기술적
+        msg += f"📊 <b>기술적</b>\n"
+        msg += f"현재가: {currency}{current_price:,} ({change_pct:+.1f}%)\n"
+        msg += f"RSI: {tech_data.get('rsi', 'N/A')} | 거래량: {tech_data.get('vol_ratio', 1)}배\n"
+        msg += f"OBV: {tech_data.get('obv_trend', 'N/A')} | 고점 대비: {tech_data.get('drawdown', 'N/A')}%\n\n"
+ 
+        # 수급
+        if market == "KR" and supply_text != "수급 데이터 없음":
+            msg += f"💰 <b>수급</b>\n{supply_text}\n\n"
+ 
+        # 시황
+        msg += f"🌍 <b>시황</b>\n"
+        msg += f"{cur_regime}장 | {', '.join(selected_sectors[:2]) if selected_sectors else '섹터 미선정'}\n"
+        if event_text != "없음":
+            msg += f"⚠️ 오늘 이벤트: {event_text}\n"
+        if fx_text:
+            msg += f"💱 {fx_text}\n"
+        msg += "\n"
+ 
+        # AI 종합 판단
+        msg += f"🤖 <b>AI 종합 판단</b>\n"
+        msg += f"{timing_emoji} 타이밍: {ai_res.get('timing', '?')} — {ai_res.get('timing_reason', '')}\n"
+        msg += f"⚔️ 전략: {ai_res.get('strategy', '?')} — {ai_res.get('strategy_reason', '')}\n\n"
+        msg += f"🎯 목표가: {currency}{float(ai_res.get('target', 0)):,.0f}\n"
+        msg += f"🛑 손절가: {currency}{float(ai_res.get('stop_loss', 0)):,.0f}\n"
+        msg += f"⚠️ 리스크: {ai_res.get('risk', '')}\n\n"
+ 
+        # 대안 종목
+        alternatives = ai_res.get('alternatives', [])
+        if alternatives:
+            msg += f"💡 <b>대안 종목</b>: {', '.join(alternatives)}\n\n"
+ 
+        msg += f"📌 {ai_res.get('overall', '')}\n"
+        msg += f"\n⚠️ 최종 판단은 본인이 하세요\n"
+        msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+ 
+        await safe_send_message(update, msg)
+ 
+    except Exception as e:
+        await update.message.reply_text(f"❌ 분석 실패: {e}")
+        print(f"  ❌ cmd_analyze 실패: {e}")
 
 async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🌍 수집 중...")
@@ -2265,6 +2613,7 @@ def main():
     app.add_handler(CommandHandler("backtest", cmd_backtest))
     app.add_handler(CommandHandler("buy_rate", cmd_buy_rate))
     app.add_handler(CommandHandler("loss", cmd_loss))
+    app.add_handler(CommandHandler("analyze", cmd_analyze))
 
     print("🤖 봇 대기 중...")
 
