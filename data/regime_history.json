@@ -3,29 +3,6 @@
     "regime": "강세",
     "score": 10,
     "strategy": "강세장_전략",
-    "kospi_current": 6472.73,
-    "kospi_ma20": 5856.69,
-    "kospi_drawdown": -0.0,
-    "week_change": 4.08,
-    "month_change": 22.65,
-    "consecutive_days": 183,
-    "details": [
-      "✅ 코스피 단기 정배열",
-      "✅ 코스피 장기 정배열",
-      "✅ 코스피 20일선 위",
-      "✅ 최근 5일 +4.1% 상승",
-      "✅ 최근 20일 +22.7% 상승",
-      "✅ VIX 낮음 (19.3) → 안정",
-      "✅ 고점 대비 -0.0% (건강한 상승)"
-    ],
-    "prev_regime": "강세",
-    "regime_changed": false,
-    "updated": "2026-04-24T15:04:35.590784"
-  },
-  {
-    "regime": "강세",
-    "score": 10,
-    "strategy": "강세장_전략",
     "kospi_current": 6478.19,
     "kospi_ma20": 5856.97,
     "kospi_drawdown": 0.0,
@@ -1378,5 +1355,28 @@
     "prev_regime": "강세",
     "regime_changed": false,
     "updated": "2026-04-26T04:05:20.607524"
+  },
+  {
+    "regime": "강세",
+    "score": 10,
+    "strategy": "강세장_전략",
+    "kospi_current": 6475.63,
+    "kospi_ma20": 5856.84,
+    "kospi_drawdown": -0.0,
+    "week_change": 4.13,
+    "month_change": 22.71,
+    "consecutive_days": 242,
+    "details": [
+      "✅ 코스피 단기 정배열",
+      "✅ 코스피 장기 정배열",
+      "✅ 코스피 20일선 위",
+      "✅ 최근 5일 +4.1% 상승",
+      "✅ 최근 20일 +22.7% 상승",
+      "✅ VIX 낮음 (18.7) → 안정",
+      "✅ 고점 대비 -0.0% (건강한 상승)"
+    ],
+    "prev_regime": "강세",
+    "regime_changed": false,
+    "updated": "2026-04-26T04:33:22.483194"
   }
 ]

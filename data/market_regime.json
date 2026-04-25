@@ -7,7 +7,7 @@
   "kospi_drawdown": -0.0,
   "week_change": 4.13,
   "month_change": 22.71,
-  "consecutive_days": 241,
+  "consecutive_days": 242,
   "details": [
     "✅ 코스피 단기 정배열",
     "✅ 코스피 장기 정배열",
@@ -19,5 +19,5 @@
   ],
   "prev_regime": "강세",
   "regime_changed": false,
-  "updated": "2026-04-26T04:05:20.607524"
+  "updated": "2026-04-26T04:33:22.483194"
 }

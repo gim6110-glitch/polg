@@ -983,6 +983,8 @@ async def closing_summary_old():
 
 async def portfolio_alert_check():
     """포트폴리오 목표가/손절가 + 환율 + 세력 흔들기 체크"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 💼 포트폴리오 알림 체크")
 
     try:

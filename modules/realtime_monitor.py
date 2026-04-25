@@ -222,7 +222,7 @@ class RealtimeMonitor:
             alert_key = f"{code}_급락_일"
 
         if urgency >= 3 and alert_key and signals:
-            cooldown = 10 if urgency >= 6 else 20 if urgency >= 4 else 30
+            cooldown = 240 if urgency >= 6 else 240 if urgency >= 4 else 240
             if self._can_alert(alert_key, cooldown_min=cooldown):
                 await self._send_kr_alert(
                     name, code, data, signals, urgency,
@@ -339,7 +339,7 @@ class RealtimeMonitor:
             alert_key = f"{ticker}_급락"
 
         if urgency >= 3 and alert_key and signals:
-            cooldown = 15 if urgency >= 5 else 30
+            cooldown = 240
             if self._can_alert(alert_key, cooldown_min=cooldown):
                 is_drop = change_pct <= -4
                 levels  = self._calc_trade_levels(current, change_pct, "급등", is_kr=False)
@@ -460,6 +460,9 @@ class RealtimeMonitor:
         while self.running:
             try:
                 hour    = datetime.now().hour
+                if datetime.now().weekday() >= 5:
+                    await asyncio.sleep(interval_sec)
+                    continue
                 kr_open = (9 <= hour < 16)
                 us_open = (hour >= 21 or hour < 4)
                 if kr_open or us_open:
