@@ -806,7 +806,7 @@ async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     news   = NewsCollector().collect_news(max_per_feed=5)
     result = ai.analyze_sector_trend(news)
     if result:
-        await safe_send_message(update, f"📊 <b>섹터 트렌드</b>\n\n{result}")
+        await send(f"📊 <b>섹터 트렌드</b>\n\n{result}")
     else:
         await update.message.reply_text("❌ 실패")
 
