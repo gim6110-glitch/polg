@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "updated_at": "2025-04-25",
+  "stocks": {
+    "APLD": {
+      "name": "Applied Digital",
+      "theme": "AI 데이터센터 인프라",
+      "memo": "",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "AMPX": {
+      "name": "Amprius Technologies",
+      "theme": "혁신 배터리",
+      "memo": "에너지밀도 500%",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "RXRX": {
+      "name": "Recursion Pharmaceuticals",
+      "theme": "AI 신약",
+      "memo": "엔비디아 투자",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "IONQ": {
+      "name": "IonQ",
+      "theme": "양자컴퓨터",
+      "memo": "양자컴퓨터 1위",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "RKLB": {
+      "name": "Rocket Lab",
+      "theme": "우주항공",
+      "memo": "스페이스X 대항마",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "OKLO": {
+      "name": "Oklo",
+      "theme": "소형원자로 SMR",
+      "memo": "",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "RGTI": {
+      "name": "Rigetti Computing",
+      "theme": "양자컴퓨터",
+      "memo": "양자컴퓨터 2위",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    },
+    "ASTS": {
+      "name": "AST SpaceMobile",
+      "theme": "위성 직접통신",
+      "memo": "",
+      "added_at": "2025-04-25",
+      "status": "유지",
+      "last_reviewed": "2025-04-25"
+    }
+  }
+}

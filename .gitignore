@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.save
+.env
+venv/
+data/kis_token.json
+data/ai_learning.db

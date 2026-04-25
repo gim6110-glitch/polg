@@ -1,0 +1,55 @@
+{
+  "themes": {
+    "메디컬투어리즘": {
+      "name": "메디컬투어리즘",
+      "description": "외국인 환자 유치 및 의료 관광 관련 섹터",
+      "market": "KR",
+      "reason": "한국 병원 찾은 외국인 200만명 첫 돌파, 미용 과목 중심으로 의료관광 산업 급성장",
+      "stocks": {
+        "JW중외제약": "001060",
+        "메디포스트": "078160",
+        "이원다이애그노믹스": "114190"
+      },
+      "confidence": 0.75,
+      "status": "임시",
+      "mentions": 1,
+      "added": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "expires": "2026-04-28"
+    },
+    "우주항공": {
+      "name": "우주항공",
+      "description": "우주 산업 및 항공우주 관련 ETF 투자 증가",
+      "market": "US",
+      "reason": "항공우주·방산 거래가 우주로 확대되며 관련 ETF 증가, 투자자 관심 급증",
+      "stocks": {
+        "UFO": "UFO",
+        "ROKT": "ROKT",
+        "ARK Space Exploration": "ARKX"
+      },
+      "confidence": 0.7,
+      "status": "임시",
+      "mentions": 1,
+      "added": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "expires": "2026-04-28"
+    },
+    "중국전기차기술": {
+      "name": "중국전기차기술",
+      "description": "중국 자동차 시장에서 기술력으로 경쟁하는 외국 자동차 기업",
+      "market": "BOTH",
+      "reason": "외국 자동차 회사들이 기술력을 앞세워 중국 시장 공략 강화",
+      "stocks": {
+        "Tesla": "TSLA",
+        "GM": "GM",
+        "Ford": "F"
+      },
+      "confidence": 0.6,
+      "status": "임시",
+      "mentions": 1,
+      "added": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "expires": "2026-04-28"
+    }
+  }
+}

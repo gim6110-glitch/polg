@@ -1,0 +1,106 @@
+{
+  "rotation_KR": {
+    "date": "2026-04-25",
+    "hot_sectors": [
+      "AI반도체",
+      "방산"
+    ],
+    "next_sectors": [
+      "바이오"
+    ],
+    "hot_reason": "인텔 칩플레이션 수혜로 시간외 20% 급등, 중동전쟁 확대 및 미국 미사일 재고 부족 우려로 방산 수요 증가",
+    "results": {
+      "AI반도체": {
+        "target": "대장주",
+        "reason": "섹터 초입 → 대장주 선취매 기회",
+        "stocks": [
+          {
+            "name": "삼성전자",
+            "ticker": "005930",
+            "change": -2.23
+          },
+          {
+            "name": "SK하이닉스",
+            "ticker": "000660",
+            "change": -0.24
+          }
+        ],
+        "대장_avg": -1.23,
+        "2등주_avg": 2.19,
+        "소부장_avg": 0.0
+      },
+      "방산": {
+        "target": "대장주",
+        "reason": "대장주 +2.5% 상승 중 → 추가 상승 여력 있음",
+        "stocks": [
+          {
+            "name": "LIG넥스원",
+            "ticker": "079550",
+            "change": 2.38
+          },
+          {
+            "name": "한화에어로스페이스",
+            "ticker": "012450",
+            "change": 2.67
+          }
+        ],
+        "대장_avg": 2.52,
+        "2등주_avg": -1.14,
+        "소부장_avg": 0.0
+      }
+    },
+    "updated": "2026-04-25T06:00:46.313838"
+  },
+  "rotation_US": {
+    "date": "2026-04-25",
+    "hot_sectors": [
+      "미국AI",
+      "미국방산"
+    ],
+    "next_sectors": [
+      "미국에너지"
+    ],
+    "hot_reason": "인텔 칩플레이션 호재로 시간외 20% 급등, 중동전 확대와 미국 미사일 재고 우려로 방산 수요 증가",
+    "results": {
+      "미국AI": {
+        "target": "대장주",
+        "reason": "대장주 +3.2% 상승 중 → 추가 상승 여력 있음",
+        "stocks": [
+          {
+            "name": "Microsoft",
+            "ticker": "MSFT",
+            "change": 2.1
+          },
+          {
+            "name": "NVIDIA",
+            "ticker": "NVDA",
+            "change": 4.23
+          }
+        ],
+        "대장_avg": 3.17,
+        "2등주_avg": 4.01,
+        "소부장_avg": 0.0
+      },
+      "미국방산": {
+        "target": "대장주",
+        "reason": "섹터 초입 → 대장주 선취매 기회",
+        "stocks": [
+          {
+            "name": "Lockheed Martin",
+            "ticker": "LMT",
+            "change": -3.22
+          },
+          {
+            "name": "RTX",
+            "ticker": "RTX",
+            "change": -2.71
+          }
+        ],
+        "대장_avg": -2.96,
+        "2등주_avg": -2.05,
+        "소부장_avg": 0.0
+      }
+    },
+    "updated": "2026-04-25T06:01:00.813748"
+  }
+}
