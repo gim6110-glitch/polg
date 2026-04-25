@@ -254,7 +254,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     port_us    = len([t for t, s in pf.portfolio.items() if s.get('market') == 'US'])
     msg  = f"⚙️ <b>시스템 상태</b>\n\n"
     msg += f"🍓 라즈베리파이5: 정상\n"
-    msg += f"🤖 AI: Claude Sonnet 4.5\n"
+    msg += f"🤖 AI: Claude Sonnet 4.6\n"
     msg += f"{em} 장세: {r.get('regime','?')}장\n\n"
     msg += f"📊 <b>섹터 DB</b>\n"
     msg += f"  🇰🇷 한국: {kr_sectors}개 섹터 / {len(kr_tickers)}개 종목\n"
@@ -1128,45 +1128,23 @@ async def cmd_supply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── 스마트 스캔 ──
 async def smart_scan(notify_all=False):
+    """장세 전환 감지 (30분마다)"""
     r           = regime.analyze_regime()
-    params      = regime.get_strategy_params()
-    em          = regime.get_regime_emoji()
     regime_type = r['regime']
-    print(f"[{datetime.now().strftime('%H:%M')}] {em} {regime_type}장 스캔")
+    em          = regime.get_regime_emoji()
+    print(f"[{datetime.now().strftime('%H:%M')}] {em} {regime_type}장 체크")
 
+    # 장세 전환 시 즉시 알림
     if r.get('regime_changed'):
         params_new = regime.get_strategy_params()
         await send(f"""🔄 <b>장세 전환!</b>
 
-{r.get('prev_regime')}장 → {r.get('regime')}장
-⚔️ 전략 자동 전환: {params_new['description']}
+{r.get('prev_regime')}장 → <b>{r.get('regime')}장</b>
+⚔️ 전략: {params_new['description']}
 
-📊 코스피: {r.get('kospi_current'):,}
-📉 고점 대비: {r.get('kospi_drawdown')}%
+🇰🇷 코스피: {r.get('kospi_current'):,}
+🇺🇸 나스닥: {r.get('nas_current'):,}
 ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}""")
-
-    if regime_type in ['강세', '중립']:
-        results = bullish.scan_bullish(KR_SCAN_STOCKS, params)
-        for sig in results[:3]:
-            key = f"{sig['ticker']}_{sig['type']}"
-            if monitor._can_alert(key, cooldown_hours=6) or notify_all:
-                type_emoji   = {"신고가_돌파": "🚀", "눌림목_매수": "📉", "추세_추종": "📈"}.get(sig['type'], "🔔")
-                signals_text = "\n".join(sig.get('signals', []))
-                msg = f"""{type_emoji} <b>[{regime_type}장] {sig['name']}</b>
-신호: {sig['type']}
-
-💰 현재가: {sig['current_price']:,}
-🎯 목표가: {sig['target_price']:,}
-📉 손절가: {sig['stop_loss']:,}
-
-{signals_text}
-
-⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
-                await send(msg)
-    else:
-        await monitor.check_buy_signals()
-
-    await long_term_scan()
 
 async def long_term_scan(notify_all=False):
     for name, ticker in LONG_TERM_STOCKS.items():
@@ -1759,7 +1737,7 @@ async def us_market_closing_analysis():
 4. 주의사항"""
 
         res = client.messages.create(
-            model="claude-sonnet-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -2047,7 +2025,7 @@ JSON으로만:
 }}"""
 
         res  = client.messages.create(
-            model="claude-sonnet-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -2646,8 +2624,8 @@ def main():
 {em} 장세: <b>{r['regime']}장</b>
 ⚔️ {params['description']}
 ⚡ 실시간 모니터: 5분마다 감시
-🤖 Claude Sonnet 4.5
-📊 한국 {_kr}개 + 미국 {_us}개 종목 감시시
+🤖 Claude Sonnet 4.6
+📊 한국 {_kr}개 + 미국 {_us}개 종목 감시
 📱 /start 명령어 확인"""))
 
     token = os.getenv('TELEGRAM_BOT_TOKEN')
