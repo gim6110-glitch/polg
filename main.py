@@ -225,6 +225,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ③ 30분마다 결과 체크 함수 추가
 async def backtest_price_check():
     """30분마다 모의 테스트 결과 체크"""
+    if is_weekend():
+        return
     try:
         results = bt.update_prices()
         if results:
@@ -788,6 +790,8 @@ async def long_term_scan(notify_all=False):
 # ── 스케줄 작업 ──
 async def premarket_morning_scan():
     """매일 새벽 5시 상한가 후보 스캔"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌅 새벽 상한가 스캔")
     try:
         nc   = NewsCollector()
@@ -802,6 +806,8 @@ async def premarket_morning_scan():
 
 async def run_daily_rotation():
     """매일 06:00 순환매 + 동적 테마 분석"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🔄 순환매 + 테마 분석")
     try:
         from modules.daily_rotation import run_daily_rotation as _rotation
@@ -880,6 +886,8 @@ async def morning_briefing_old():
 
 async def short_term_recommendation():
     """07:30 장전 단기 추천 → NXT 08:00 진입용"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🟡 07:30 단기 추천 시작")
     try:
         # 레이어 1: 시장 온도 + 섹터 선정
@@ -923,6 +931,8 @@ async def short_term_recommendation():
 
 async def afternoon_recommendation():
     """14:30 내일 선점 추천 → NXT/장후 진입용"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🕑 14:30 선점 추천 시작")
     try:
         r = regime.current_regime
@@ -950,6 +960,8 @@ async def afternoon_recommendation():
 
 async def nxt_closing_summary():
     """19:50 NXT 마감 요약"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] \U0001f306 NXT \ub9c8\uac10 \uc694\uc57d")
     try:
         from modules.premarket_futures import PremarketFutures
@@ -982,6 +994,8 @@ async def nxt_closing_summary():
 
 async def closing_summary():
     """15:40 마감 요약 + 내일 선점 추천"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 📊 마감 분석 + 내일 추천")
     try:
         nc       = NewsCollector()
@@ -1027,7 +1041,6 @@ async def closing_summary_old():
     except Exception as e:
         print(f"❌ {e}")
 
-async def portfolio_alert_check():
     """포트폴리오 목표가/손절가 + 환율 + 세력 흔들기 체크"""
     if is_weekend():
         return
@@ -1099,6 +1112,8 @@ async def portfolio_alert_check():
 
 async def morning_portfolio_diagnosis():
     """매일 아침 AI 포트폴리오 진단 + DB 저장"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🧠 아침 포트폴리오 진단")
     try:
         nc   = NewsCollector()
@@ -1161,6 +1176,8 @@ async def morning_portfolio_diagnosis():
 
 async def save_asset_snapshot():
     print(f"[{datetime.now().strftime('%H:%M')}] 💾 총자산 스냅샷 저장")
+    if is_weekend():
+        return
 
     try:
         total, exchange_rate = tg.get_total_assets(pf.portfolio)
@@ -1213,7 +1230,6 @@ async def update_event_calendar():
     except Exception as e:
         print(f"  ❌ 캘린더 업데이트 실패: {e}")
 
-async def health_check():
     r     = regime.current_regime
     em    = regime.get_regime_emoji()
     total = sum(len(v) for v in monitor.watchlist.values())
@@ -2124,7 +2140,6 @@ def schedule_thread():
     schedule.every().day.at("07:30").do(run_schedule_job, short_term_recommendation)
     # 장전
     schedule.every().day.at("08:00").do(run_schedule_job, save_asset_snapshot)
-    schedule.every().day.at("08:00").do(run_schedule_job, health_check)
     schedule.every().day.at("08:00").do(run_schedule_job, us_market_closing_analysis)
     schedule.every().day.at("08:10").do(run_schedule_job, morning_portfolio_diagnosis)
     schedule.every().day.at("08:10").do(run_schedule_job, risk_analysis)
@@ -2145,7 +2160,6 @@ def schedule_thread():
     schedule.every().day.at("23:30").do(run_schedule_job, us_lowpoint_scan)
     # 실시간
     schedule.every(30).minutes.do(run_schedule_job, intraday_scan)
-    schedule.every(30).minutes.do(run_schedule_job, portfolio_alert_check)
     schedule.every(30).minutes.do(run_schedule_job, longterm_scan)
     schedule.every(30).minutes.do(run_schedule_job, highlow_scan)
     schedule.every(30).minutes.do(run_schedule_job, backtest_price_check)
