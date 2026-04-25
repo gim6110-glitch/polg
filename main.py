@@ -4,7 +4,7 @@ import asyncio
 import schedule
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
@@ -218,6 +218,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚙️ <b>시스템</b>
 /backtest — 모의 테스트 승률/수익률
+/loss — 손실 한도 현황
 /status — 시스템 상태"""
     await safe_send_message(update, msg)
 
@@ -576,6 +577,51 @@ async def cmd_sell(update, context):
         )
     else:
         await update.message.reply_text(f"❌ {ticker} 포트폴리오에 없음")
+
+async def cmd_loss(update, context):
+    """/loss — 손실 한도 현황"""
+    try:
+        total, exchange_rate = tg.get_total_assets(pf.portfolio)
+        is_blocked, blocked, warnings = tg.full_check(mt.get_current_context(), total)
+ 
+        violations = tg.check_loss_limits(total)
+ 
+        msg  = f"📊 <b>손실 한도 현황</b>\n\n"
+        msg += f"💰 현재 총자산: {total:,.0f}원\n\n"
+ 
+        if violations:
+            msg += "🛑 <b>손실 한도 초과</b>\n"
+            for v in violations:
+                msg += f"  {v['type']}: {v['actual']:+.1f}% (한도: {v['limit']}%)\n"
+                msg += f"  → {v['action']}\n"
+        else:
+            msg += "✅ 손실 한도 정상\n"
+ 
+        # 스냅샷 기반 수익률
+        snapshots = tg.snapshots
+        today_key = datetime.now().strftime("%Y-%m-%d")
+        yesterday_key = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+ 
+        if yesterday_key in snapshots:
+            prev    = snapshots[yesterday_key]["total_krw"]
+            day_pct = ((total - prev) / prev) * 100
+            msg    += f"\n📅 일간: {day_pct:+.2f}% (한도: -1%)\n"
+ 
+        weekly_start = tg.data.get("weekly_start")
+        if weekly_start:
+            week_pct = ((total - weekly_start) / weekly_start) * 100
+            msg     += f"📅 주간: {week_pct:+.2f}% (한도: -3%)\n"
+ 
+        monthly_start = tg.data.get("monthly_start")
+        if monthly_start:
+            month_pct = ((total - monthly_start) / monthly_start) * 100
+            msg      += f"📅 월간: {month_pct:+.2f}% (한도: -7%)\n"
+ 
+        msg += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        from main import send as _send
+        await _send(msg)
+    except Exception as e:
+        await update.message.reply_text(f"❌ 실패: {e}")
 
 async def cmd_diagnosis(update, context):
     await update.message.reply_text("🧠 AI 포트폴리오 진단 중... (30~60초)")
@@ -1140,6 +1186,20 @@ async def save_asset_snapshot():
 
     except Exception as e:
         print(f"  ❌ 스냅샷 저장 실패: {e}")
+
+# ② 23:30 미국 대형주 저점 스캔 함수 추가
+async def us_lowpoint_scan():
+    """23:30 미국 대형주 저점 스캔"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🌙 미국 대형주 저점 스캔")
+    try:
+        from modules.realtime_monitor import RealtimeMonitor
+        rt      = RealtimeMonitor(alert_callback=send, monitor=monitor, regime=regime)
+        context = mt.get_current_context()
+        await rt.scan_us_evening(context)
+    except Exception as e:
+        print(f"  ❌ 미국 저점 스캔 실패: {e}")
 
 async def update_event_calendar():
     if datetime.now().day != 1:
@@ -2082,6 +2142,7 @@ def schedule_thread():
     # 미국장
     schedule.every().day.at("20:30").do(run_schedule_job, us_pre_trading_briefing)
     schedule.every().day.at("21:00").do(run_schedule_job, us_premarket_analysis)
+    schedule.every().day.at("23:30").do(run_schedule_job, us_lowpoint_scan)
     # 실시간
     schedule.every(30).minutes.do(run_schedule_job, intraday_scan)
     schedule.every(30).minutes.do(run_schedule_job, portfolio_alert_check)
@@ -2189,6 +2250,7 @@ def main():
     app.add_handler(CommandHandler("gamble", cmd_gamble))
     app.add_handler(CommandHandler("backtest", cmd_backtest))
     app.add_handler(CommandHandler("buy_rate", cmd_buy_rate))
+    app.add_handler(CommandHandler("loss", cmd_loss))
 
     print("🤖 봇 대기 중...")
 
