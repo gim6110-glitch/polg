@@ -129,7 +129,7 @@ JSON으로만 답변:
 
         try:
             res  = client.messages.create(
-                model="claude-sonnet-4-5",
+                model="claude-sonnet-4-6",
                 max_tokens=300,
                 messages=[{"role": "user", "content": prompt}]
             )

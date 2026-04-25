@@ -10,7 +10,7 @@ class ClaudeAnalyzer:
         self.client = anthropic.Anthropic(
             api_key=os.getenv('ANTHROPIC_API_KEY')
         )
-        self.model = "claude-sonnet-4-5"
+        self.model = "claude-sonnet-4-6"
         self.daily_call_count = 0
         self.max_daily_calls = 30  # 하루 최대 호출 횟수 제한
 

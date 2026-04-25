@@ -158,7 +158,7 @@ JSON으로만:
 }}
 반드시 실제 가격 숫자를 넣어주세요."""
         try:
-            res  = client.messages.create(model="claude-sonnet-4-5", max_tokens=1500, messages=[{"role": "user", "content": prompt}])
+            res  = client.messages.create(model="claude-sonnet-4-6", max_tokens=1500, messages=[{"role": "user", "content": prompt}])
             text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
             m    = re.search(r'\{.*\}', text, re.DOTALL)
             if m:

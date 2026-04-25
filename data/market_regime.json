@@ -1,7 +1,7 @@
 {
   "regime": "강세",
   "score": 10,
-  "consecutive_days": 257,
+  "consecutive_days": 258,
   "prev_regime": "강세",
   "regime_changed": false,
   "strategy": "강세_전략",
@@ -42,5 +42,5 @@
   "nas_month_change": 18.56,
   "sp_current": 7165.08,
   "sp_change": 0.8,
-  "updated": "2026-04-26T06:30:05.792421"
+  "updated": "2026-04-26T06:35:33.046859"
 }

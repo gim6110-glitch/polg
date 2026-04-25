@@ -145,7 +145,7 @@ class PremarketScan:
                 client    = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
                 news_text = "\n".join([f"- {n['title']}" for n in news_list[:10]])
                 res       = client.messages.create(
-                    model="claude-sonnet-4-5",
+                    model="claude-sonnet-4-6",
                     max_tokens=200,
                     messages=[{
                         "role": "user",
