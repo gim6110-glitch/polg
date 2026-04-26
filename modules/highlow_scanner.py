@@ -143,7 +143,7 @@ class HighLowScanner:
         kr_highs = [s for s in kr_signals if s["signal_type"] == "신고가"]
         if kr_highs:
             key = f"highs_kr_{datetime.now().strftime('%Y%m%d%H')}"
-            if self._can_alert(key, cooldown_hours=2):
+            if self._can_alert(key, cooldown_hours=24):
                 msg = f"🏔 <b>한국 52주 신고가</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
                 for s in kr_highs[:5]:
                     msg += f"  ✅ {s['name']} ({s['ticker']}): {s['price']:,}원 ({s['change_pct']:+.1f}%) [{s['sector']}]\n"
@@ -152,7 +152,7 @@ class HighLowScanner:
         us_highs = [s for s in us_signals if s["signal_type"] == "신고가"]
         if us_highs:
             key = f"highs_us_{datetime.now().strftime('%Y%m%d%H')}"
-            if self._can_alert(key, cooldown_hours=2):
+            if self._can_alert(key, cooldown_hours=24):
                 msg = f"🏔 <b>미국 52주 신고가</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
                 for s in us_highs[:5]:
                     msg += f"  ✅ {s['name']} ({s['ticker']}): ${s['price']} ({s['change_pct']:+.1f}%) [{s['sector']}]\n"

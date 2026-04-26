@@ -220,8 +220,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     us_tickers = get_all_tickers('US')
     kr_sectors = len([s for s, d in SECTOR_DB.items() if d.get('market') == 'KR'])
     us_sectors = len([s for s, d in SECTOR_DB.items() if d.get('market') == 'US'])
-    port_kr    = len([t for t, s in pf.portfolio.items() if s.get('market') == 'KR'])
-    port_us    = len([t for t, s in pf.portfolio.items() if s.get('market') == 'US'])
+    port_kr    = len([t for t, s in pf.portfolio.items() if isinstance(s, dict) and s.get("market") == "KR"])
+    port_us    = len([t for t, s in pf.portfolio.items() if isinstance(s, dict) and s.get("market") == "US"])
     msg  = f"⚙️ <b>시스템 상태</b>\n\n"
     msg += f"🍓 라즈베리파이5: 정상\n"
     msg += f"🤖 AI: Claude Sonnet 4.6\n"

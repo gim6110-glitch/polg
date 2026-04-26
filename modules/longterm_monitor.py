@@ -273,7 +273,7 @@ class LongtermMonitor:
 
                     if score >= 5:
                         alert_key = f"longterm_{ticker}_{market}"
-                        if not self._can_alert(alert_key, cooldown_hours=6):
+                        if not self._can_alert(alert_key, cooldown_hours=24):
                             continue
                         data['theme']      = theme_name
                         data['score']      = score
@@ -294,7 +294,7 @@ class LongtermMonitor:
 
             if score >= 5:
                 alert_key = f"gamble_{ticker}"
-                if not self._can_alert(alert_key, cooldown_hours=6):
+                if not self._can_alert(alert_key, cooldown_hours=24):
                     continue
                 data['theme']   = info['theme']
                 data['score']   = score
