@@ -221,7 +221,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /backtest — 모의 테스트 승률/수익률
 /loss — 손실 한도 현황
 /status — 시스템 상태"""
-    await safe_send_message(update, msg)
+    await send(msg)
 
 # ③ 30분마다 결과 체크 함수 추가
 async def backtest_price_check():
@@ -240,7 +240,7 @@ async def backtest_price_check():
 async def cmd_regime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📊 장세 분석 중...")
     regime.analyze_regime()
-    await safe_send_message(update, regime.get_status_text())
+    await send(regime.get_status_text())
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from modules.sector_db import SECTOR_DB, get_all_tickers
@@ -264,7 +264,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"  🇺🇸 미국: {port_us}개\n\n"
     msg += f"⚡ 실시간 모니터: 5분마다 감시 중\n"
     msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    await safe_send_message(update, msg)
+    await send(msg)
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from modules.sector_db import SECTOR_DB
@@ -292,7 +292,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "🇺🇸 미국\n"
         for ticker, stock in port_us.items():
             msg += f"  • {stock.get('name', ticker)} ({ticker})\n"
-    await safe_send_message(update, msg)
+    await send(msg)
 
 
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -419,7 +419,7 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {ai_result if ai_result else "분석 불가"}
 
 ⏰ {data['timestamp']}"""
-    await safe_send_message(update, msg)
+    await send(msg)
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -762,7 +762,7 @@ OBV: {tech_data.get('obv_trend', 'N/A')}
         msg += f"\n⚠️ 최종 판단은 본인이 하세요\n"
         msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
  
-        await safe_send_message(update, msg)
+        await send(msg)
  
     except Exception as e:
         await update.message.reply_text(f"❌ 분석 실패: {e}")
@@ -797,7 +797,7 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 😨 공포탐욕: {fg_text}
 
 ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
-        await safe_send_message(update, msg)
+        await send(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ {e}")
 
@@ -869,7 +869,7 @@ async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"📊 장세 신뢰도: {ai_result.get('regime_confidence', '?')}\n"
         msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
-        await safe_send_message(update, msg)
+        await send(msg)
 
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
@@ -883,7 +883,7 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indicators = MarketIndicators().get_all_indicators()
         result     = ai.analyze_market(news, prices, indicators)
         if result:
-            await safe_send_message(update, f"🧠 <b>AI 브리핑</b>\n\n{result}")
+            await send(f"🧠 <b>AI 브리핑</b>\n\n{result}")
         else:
             await update.message.reply_text("❌ 실패")
     except Exception as e:
@@ -900,7 +900,7 @@ async def cmd_portfolio(update, context):
     await update.message.reply_text("📊 포트폴리오 조회 중... (2~3분 소요)")
     try:
         msg = pf.build_portfolio_message()
-        await safe_send_message(update, msg)
+        await send(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
@@ -1074,7 +1074,7 @@ async def cmd_premarket(update, context):
         news = NewsCollector().collect_news(max_per_feed=3)
         candidates, hot_sectors = await pm.scan_top_candidates(news)
         msg = pm.build_premarket_message(candidates, hot_sectors)
-        await safe_send_message(update, msg)
+        await send(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
@@ -1082,14 +1082,14 @@ async def cmd_leverage(update, context):
     await update.message.reply_text("⚡ 레버리지 ETF 현황 조회 중...")
     try:
         msg = lm.build_leverage_status_message()
-        await safe_send_message(update, msg)
+        await send(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
 async def cmd_themes(update, context):
     """현재 임시 테마 현황"""
     msg = ds.get_status_text()
-    await safe_send_message(update, msg)
+    await send(msg)
 
 async def cmd_add_sector(update, context):
     """임시 테마를 고정 섹터로 승격"""
@@ -1107,7 +1107,7 @@ async def cmd_accuracy(update, context):
     await update.message.reply_text("📊 AI 정확도 리포트 생성 중...")
     try:
         report = al.get_accuracy_report(days=30)
-        await safe_send_message(update, report)
+        await send(report)
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
@@ -1120,7 +1120,7 @@ async def cmd_supply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if messages:
             for msg in messages:
                 if msg and msg.strip():
-                    await safe_send_message(update, msg)
+                    await send(msg)
         else:
             await update.message.reply_text("ℹ️ 현재 특이 수급 신호 없음")
     except Exception as e:
@@ -2669,33 +2669,11 @@ def main():
 
     # 봇 연결 끊겨도 자동 재연결
     async def run_bot():
-        await app.initialize()
-        await app.start()
-        # webhook 삭제 + pending 업데이트 제거
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("✅ 텔레그램 봇 시작")
-
-        offset = None
-        while True:
-            try:
-                updates = await app.bot.get_updates(
-                    offset=offset,
-                    timeout=30,
-                    allowed_updates=["message", "callback_query"]
-                )
-                for update in updates:
-                    offset = update.update_id + 1
-                    await app.process_update(update)
-            except Exception as e:
-                err = str(e)
-                if "Conflict" in err:
-                    print(f"⚠️ 봇 충돌 감지 - 30초 후 재시도")
-                    await asyncio.sleep(30)
-                elif "timed out" in err.lower() or "timeout" in err.lower():
-                    pass  # 타임아웃은 정상
-                else:
-                    print(f"⚠️ 봇 에러: {e}")
-                    await asyncio.sleep(5)
+        async with app:
+            await app.start()
+            await asyncio.Event().wait()
 
     asyncio.run(run_bot())
 

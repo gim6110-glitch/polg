@@ -33,23 +33,6 @@
       "added": "2026-04-25",
       "last_seen": "2026-04-25",
       "expires": "2026-04-28"
-    },
-    "중국전기차기술": {
-      "name": "중국전기차기술",
-      "description": "중국 자동차 시장에서 기술력으로 경쟁하는 외국 자동차 기업",
-      "market": "BOTH",
-      "reason": "외국 자동차 회사들이 기술력을 앞세워 중국 시장 공략 강화",
-      "stocks": {
-        "Tesla": "TSLA",
-        "GM": "GM",
-        "Ford": "F"
-      },
-      "confidence": 0.6,
-      "status": "임시",
-      "mentions": 1,
-      "added": "2026-04-25",
-      "last_seen": "2026-04-25",
-      "expires": "2026-04-28"
     }
   }
 }

@@ -272,6 +272,9 @@ class LongtermMonitor:
                     score, signals = self._is_buy_timing(data, is_gamble=False)
 
                     if score >= 5:
+                        alert_key = f"longterm_{ticker}_{market}"
+                        if not self._can_alert(alert_key, cooldown_hours=6):
+                            continue
                         data['theme']      = theme_name
                         data['score']      = score
                         data['signals']    = signals
@@ -290,6 +293,9 @@ class LongtermMonitor:
             score, signals = self._is_buy_timing(data, is_gamble=True)
 
             if score >= 5:
+                alert_key = f"gamble_{ticker}"
+                if not self._can_alert(alert_key, cooldown_hours=6):
+                    continue
                 data['theme']   = info['theme']
                 data['score']   = score
                 data['signals'] = signals
