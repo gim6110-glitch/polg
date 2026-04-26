@@ -37,6 +37,9 @@ from modules.trade_guard import TradeGuard
 from modules.supply_demand import SupplyDemand
 from modules.event_calendar import EventCalendar
 from modules.fx_risk_manager import FxRiskManager
+from modules.closing_analyzer import ClosingAnalyzer
+from modules.macro_analyzer import MacroAnalyzer
+from modules.risk_manager import RiskManager
 
 mt = MarketTemperature()
 sr = SmartRecommender()
@@ -54,6 +57,9 @@ tg = TradeGuard()
 pf = Portfolio()
 ec = EventCalendar()
 fx = FxRiskManager()
+ca = ClosingAnalyzer()
+ma = MacroAnalyzer()
+rm = RiskManager()
 
 load_dotenv('/home/dps/stock_ai/.env')
 
@@ -1003,8 +1009,7 @@ async def cmd_loss(update, context):
             msg      += f"📅 월간: {month_pct:+.2f}% (한도: -7%)\n"
  
         msg += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        from main import send as _send
-        await _send(msg)
+        await send(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
@@ -1197,9 +1202,8 @@ async def morning_briefing():
     """07:00 아침 종합 브리핑 - 매크로 포함"""
     if is_monday():
         return  # 월요일은 monday_weekly_briefing이 대신함
-    print(f"[{datetime.now().strftime('%H:%M')}] 🌅 아침 브리핑")
-
-async def morning_briefing_old():
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌅 아침 브리핑")
     try:
         r          = regime.analyze_regime()
@@ -1243,7 +1247,7 @@ async def morning_briefing_old():
         if earn_msg:
             await send(earn_msg)
     except Exception as e:
-        print(f"❌ {e}")
+        print(f"  ❌ 아침 브리핑 실패: {e}")
 
 async def short_term_recommendation():
     """07:30 장전 단기 추천 → NXT 08:00 진입용"""
@@ -1402,6 +1406,7 @@ async def closing_summary_old():
     except Exception as e:
         print(f"❌ {e}")
 
+async def portfolio_alert_check():
     """포트폴리오 목표가/손절가 + 환율 + 세력 흔들기 체크"""
     if is_weekend():
         return
@@ -1648,6 +1653,8 @@ async def nxt_realtime_scan():
 
 async def us_market_closing_analysis():
     """08:00 미국장 마감 분석 + 오늘 한국장 예측"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌙 미국장 마감 분석")
     try:
         import yfinance as yf
@@ -1729,6 +1736,8 @@ async def us_market_closing_analysis():
 
 async def us_pre_trading_briefing():
     """20:30 미국장 전 브리핑"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌙 미국장 전 브리핑")
     try:
         nc       = NewsCollector()
@@ -1764,6 +1773,8 @@ async def nxt_analysis():
 
 async def earnings_check():
     """07:00 실적 발표 체크"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 📅 실적 발표 체크")
     try:
         upcoming, alerts = ec.check_and_alert()
@@ -1859,276 +1870,6 @@ async def risk_analysis():
         msg              = rm.build_risk_message(sector_ratio, metrics, fx_data, ai_result, upgrades)
         await send(msg)
         print("  ✅ 리스크 분석 완료")
-    except Exception as e:
-        print(f"  ❌ 리스크 분석 실패: {e}")
-
-async def us_premarket_analysis():
-    """21:00 미국 프리마켓 분석"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 🌙 미국 프리마켓")
-    try:
-        from modules.premarket_futures import PremarketFutures
-        pf_us    = PremarketFutures()
-        analysis = await pf_us.analyze_us_premarket()
-        msg      = pf_us.build_us_message(analysis)
-        await send(msg)
-    except Exception as e:
-        print(f"  ❌ 미국 프리마켓 실패: {e}")
-
-
-async def us_pre_trading_briefing():
-    """20:30 미국장 전 브리핑"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 🌙 미국장 전 브리핑")
-    try:
-        nc       = NewsCollector()
-        news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
-        macro    = await ma.analyze_macro_context(filtered)
-        result   = await sr.analyze_and_recommend(filtered, regime.current_regime.get('regime', '강세'), "20:30", macro)
-        msg      = sr.build_message(result, "20:30")
-        full_msg = f"🌙 <b>미국장 오늘 밤 전략</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
-        full_msg += f"📊 {macro.get('summary', '')}\n"
-        full_msg += f"🇺🇸 {macro.get('us_strategy', '')}\n\n"
-        full_msg += msg
-        await send(full_msg)
-    except Exception as e:
-        print(f"  ❌ 미국장 브리핑 실패: {e}")
-
-async def nxt_analysis():
-    """08:30 NXT 분석 → 정규장 선점 추천"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 🌅 NXT 분석 시작")
-    try:
-        from modules.kis_api import KISApi
-        from modules.sector_db import SECTOR_DB
-        from anthropic import Anthropic
-        import os, time as _time
-
-        kis    = KISApi()
-        client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-
-        # ① NXT 강세 종목 파악
-        print("  📊 NXT 강세 종목 수집 중...")
-        nxt_strong = []
-        nxt_weak   = []
-
-        for sector_name, sector_data in SECTOR_DB.items():
-            if sector_data.get('market') != 'KR':
-                continue
-            for tier in ['대장주', '2등주']:
-                for name, ticker in sector_data.get(tier, {}).items():
-                    data = kis.get_kr_price(ticker)
-                    if not data:
-                        continue
-                    change = data['change_pct']
-                    price  = data['price']
-                    volume = data['volume']
-
-                    if change >= 1.0:
-                        nxt_strong.append({
-                            "name": name, "ticker": ticker,
-                            "sector": sector_name, "tier": tier,
-                            "change": change, "price": price, "volume": volume
-                        })
-                    elif change <= -1.0:
-                        nxt_weak.append({
-                            "name": name, "ticker": ticker,
-                            "sector": sector_name, "tier": tier,
-                            "change": change, "price": price, "volume": volume
-                        })
-                    _time.sleep(0.15)
-
-        nxt_strong.sort(key=lambda x: x['change'], reverse=True)
-
-        # ② 뉴스 수집
-        nc       = NewsCollector()
-        news     = nc.collect_news(max_per_feed=3)
-        filtered = nc.filter_by_importance(news)
-        news_text = "\n".join([f"{'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:50]}" for n in filtered[:8]])
-
-        # ③ AI 판단 - 진짜 상승 vs 흔들기 + 정규장 선점 추천
-        strong_text = ""
-        for s in nxt_strong[:8]:
-            strong_text += f"{s['name']}({s['ticker']}) {s['sector']}/{s['tier']}: 현재가:{s['price']:,}원 등락:{s['change']:+.1f}% 거래량:{s['volume']:,}\n"
-
-        weak_text = ""
-        for s in nxt_weak[:5]:
-            weak_text += f"{s['name']}({s['ticker']}): {s['change']:+.1f}%\n"
-
-        prompt = f"""NXT(장전 거래) 데이터를 분석해서 정규장 전략을 알려주세요.
-
-=== NXT 강세 종목 ===
-{strong_text if strong_text else "강세 종목 없음"}
-
-=== NXT 약세 종목 ===
-{weak_text if weak_text else "약세 종목 없음"}
-
-=== 오늘 뉴스 ===
-{news_text}
-
-분석 요청:
-1. NXT 강세 종목 중 진짜 상승 vs 흔들기 판단
-   (거래량, 뉴스, 선물 방향 고려)
-2. 정규장에서 오를 가능성 높은 종목 TOP5
-   - NXT 강세 섹터의 아직 안 오른 2등주/소부장 우선
-   - 이미 많이 오른 종목보다 파급 효과 종목
-3. 주의할 종목 (흔들기 가능성)
-
-JSON으로만:
-{{
-  "market_outlook": "오늘 정규장 한줄 예측",
-  "real_movers": ["진짜 상승 종목1", "종목2"],
-  "fake_movers": ["흔들기 의심 종목"],
-  "recommendations": [
-    {{
-      "name": "종목명",
-      "ticker": "티커",
-      "sector": "섹터",
-      "reason": "추천 이유 한줄",
-      "current_price": 실제현재가숫자,
-      "buy_price": 실제매수가숫자,
-      "target1": 목표가1숫자,
-      "target2": 목표가2숫자,
-      "stop_loss": 손절가숫자,
-      "buy_timing": "NXT 매수 또는 정규장 초반"
-    }}
-  ],
-  "caution": "주의사항"
-}}"""
-
-        res  = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        import re, json as _json
-        text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
-        m    = re.search(r'\{.*\}', text, re.DOTALL)
-        result = _json.loads(m.group()) if m else None
-
-        # ④ 메시지 생성
-        msg  = f"🌅 <b>NXT 분석 → 정규장 선점</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
-
-        if nxt_strong:
-            msg += "📈 <b>NXT 강세 종목</b>\n"
-            for s in nxt_strong[:5]:
-                msg += f"  ▲ {s['name']} ({s['ticker']}): {s['change']:+.1f}% [{s['sector']}]\n"
-        else:
-            msg += "📊 NXT 특이 움직임 없음\n"
-
-        if result:
-            msg += f"\n💡 <b>오늘 전망</b>: {result.get('market_outlook', '')}\n"
-
-            real = result.get('real_movers', [])
-            fake = result.get('fake_movers', [])
-            if real:
-                msg += f"✅ 진짜 상승: {', '.join(real)}\n"
-            if fake:
-                msg += f"⚠️ 흔들기 주의: {', '.join(fake)}\n"
-
-            recs = result.get('recommendations', [])
-            if recs:
-                msg += "\n━━━━━━━━━━━━━━━━━━━\n"
-                msg += "🎯 <b>정규장 선점 추천</b>\n"
-                msg += "<i>(NXT 파급 효과 종목)</i>\n\n"
-                for r in recs[:5]:
-                    msg += f"⭐ <b>{r['name']}</b> ({r['ticker']})\n"
-                    msg += f"   {r['reason']}\n\n"
-                    def fmt(val):
-                        try: return f"{int(val):,}"
-                        except: return "0"
-                    msg += f"   💰 현재가: {fmt(r.get('current_price', 0))}원\n"
-                    msg += f"   🟢 매수가: {fmt(r.get('buy_price', 0))}원\n"
-                    msg += f"   ⏱ 진입:   {r.get('buy_timing', '')}\n"
-                    msg += f"   🎯 목표1:  {fmt(r.get('target1', 0))}원\n"
-                    msg += f"   🎯 목표2:  {fmt(r.get('target2', 0))}원\n"
-                    msg += f"   🛑 손절:   {fmt(r.get('stop_loss', 0))}원\n"
-                    msg += "━━━━━━━━━━━━━━━━━━━\n"
-
-            caution = result.get('caution', '')
-            if caution:
-                msg += f"\n⚠️ {caution}\n"
-
-        msg += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        await send(msg)
-        print(f"  ✅ NXT 분석 완료 (강세:{len(nxt_strong)}개)")
-    except Exception as e:
-        print(f"  ❌ NXT 분석 실패: {e}")
-
-async def earnings_check():
-    """07:00 실적 발표 체크"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 📅 실적 발표 체크")
-    try:
-        upcoming, alerts = ec.check_and_alert()
-        if alerts:
-            msg = ec.build_alert_message(upcoming)
-            if msg:
-                await send(msg)
-    except Exception as e:
-        print(f"  ❌ 실적 체크 실패: {e}")
-
-async def dart_scan():
-    """09:05, 13:00 DART 공시 체크"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 📋 DART 공시 체크")
-    try:
-        port_disc = dm.check_portfolio_disclosures(pf.portfolio)
-        if port_disc:
-            msg = dm.build_alert_message(port_disc)
-            if msg:
-                await send(msg)
-        all_disc = dm.get_today_all_disclosures()
-        if all_disc:
-            key = f"dart_market_{datetime.now().strftime('%Y%m%d%H')}"
-            if dm._can_alert(key, cooldown_hours=3):
-                msg = dm.build_market_alert(all_disc)
-                if msg:
-                    await send(msg)
-    except Exception as e:
-        print(f"  ❌ DART 스캔 실패: {e}")
-
-async def longterm_scan():
-    """30분마다 중장기 매수 타이밍"""
-    hour = datetime.now().hour
-    if not (9 <= hour < 16 or hour >= 21 or hour < 4):
-        return
-    try:
-        nc      = NewsCollector()
-        news    = nc.collect_news(max_per_feed=3)
-        signals = await ltm.scan_all_themes(news)
-        if signals:
-            msg = ltm.build_alert_message(signals)
-            if msg:
-                for s in signals:
-                    key = f"longterm_{s['ticker']}"
-                    if ltm._can_alert(key, cooldown_hours=24):
-                        await send(msg)
-                        break
-    except Exception as e:
-        print(f"  ❌ 중장기 스캔 실패: {e}")
-
-async def highlow_scan():
-    """30분마다 신고가 + 거래량 이상 감지"""
-    hour = datetime.now().hour
-    if not (9 <= hour < 16):
-        return
-    try:
-        kr_signals = hl.scan_signals("KR")
-        messages   = hl.build_alert_messages(kr_signals, [])
-        for msg in messages:
-            await send(msg)
-    except Exception as e:
-        print(f"  ❌ 신고가 스캔 실패: {e}")
-
-async def risk_analysis():
-    """08:10 포트폴리오 리스크 분석"""
-    print(f"[{datetime.now().strftime('%H:%M')}] ⚠️ 리스크 분석")
-    try:
-        rm.portfolio     = rm._load_portfolio()
-        sector_ratio, _  = rm.calc_sector_concentration()
-        metrics          = rm.calc_risk_metrics()
-        fx_data          = rm.calc_exchange_rate_risk()
-        upgrades         = rm.check_stop_loss_upgrade()
-        ai_result        = await rm.ai_risk_analysis(sector_ratio, metrics, fx_data)
-        msg              = rm.build_risk_message(sector_ratio, metrics, fx_data, ai_result, upgrades)
-        await send(msg)
     except Exception as e:
         print(f"  ❌ 리스크 분석 실패: {e}")
 
@@ -2599,7 +2340,7 @@ def main():
 📱 /start 명령어 확인"""))
 
     token = os.getenv('TELEGRAM_BOT_TOKEN')
-    app   = Application.builder().token(token).updater(None).build()
+    app   = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("status",   cmd_status))
     app.add_handler(CommandHandler("regime",   cmd_regime))
@@ -2636,16 +2377,8 @@ def main():
         await asyncio.sleep(5)
 
     app.add_error_handler(error_handler)
-
-    # 봇 연결 끊겨도 자동 재연결
-    async def run_bot():
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        print("✅ 텔레그램 봇 시작")
-        async with app:
-            await app.start()
-            await asyncio.Event().wait()
-
-    asyncio.run(run_bot())
+    print("✅ 텔레그램 봇 시작")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
