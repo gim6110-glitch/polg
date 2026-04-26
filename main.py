@@ -57,36 +57,6 @@ fx = FxRiskManager()
 
 load_dotenv('/home/dps/stock_ai/.env')
 
-# ── 텔레그램 안전 전송 (4000자 자동 분할) ──
-async def safe_send_message(bot_or_update, text, parse_mode="HTML"):
-    MAX_LEN = 4000
-    chunks = []
-    while len(text) > MAX_LEN:
-        split_at = text.rfind("\n", 0, MAX_LEN)
-        if split_at == -1:
-            split_at = MAX_LEN
-        chunks.append(text[:split_at])
-        text = text[split_at:].lstrip("\n")
-    chunks.append(text)
-    for i, chunk in enumerate(chunks):
-        if not chunk.strip():
-            continue
-        if len(chunks) > 1:
-            chunk = f"({i+1}/{len(chunks)})\n{chunk}"
-        for attempt in range(3):
-            try:
-                if hasattr(bot_or_update, "message"):
-                    await bot_or_update.message.reply_text(chunk, parse_mode=parse_mode)
-                else:
-                    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-                    await bot_or_update.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
-                await asyncio.sleep(0.5)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    await asyncio.sleep(3)
-
-
 monitor  = WatchlistMonitor()
 analyzer = TechnicalAnalyzer()
 ai       = AIAnalyzer()
