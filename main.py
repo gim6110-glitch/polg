@@ -2051,13 +2051,20 @@ async def intraday_scan():
 
 # ── 스케줄 스레드 ──
 def run_schedule_job(coro_func):
-    """스케줄 작업 안전 실행 - run_polling 루프와 공존"""
+    """스케줄 작업 안전 실행 - 메인 이벤트 루프에 전달"""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(coro_func(), loop)
+        loop = main_event_loop
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro_func(), loop)
+            # 에러만 잡기 (blocking 안 함)
+            def _done(f):
+                try:
+                    f.result()
+                except Exception as e:
+                    print(f"⚠️ 스케줄 작업 에러 ({coro_func.__name__}): {e}")
+            future.add_done_callback(_done)
         else:
-            loop.run_until_complete(coro_func())
+            print(f"⚠️ 이벤트 루프 없음 ({coro_func.__name__})")
     except Exception as e:
         print(f"⚠️ 스케줄 작업 에러 ({coro_func.__name__}): {e}")
 
@@ -2392,6 +2399,9 @@ def is_sunday():
 def is_monday():
     return datetime.now().weekday() == 0
 
+# ── 메인 이벤트 루프 (스케줄러 스레드에서 참조) ──
+main_event_loop = None
+
 def schedule_thread():
 
     schedule.every().day.at("00:00").do(run_schedule_job, update_event_calendar)
@@ -2490,6 +2500,10 @@ def main():
     em     = regime.get_regime_emoji()
     print(f"{em} 장세: {r['regime']}장")
     print(f"⚔️ 전략: {params['description']}")
+
+    # 메인 이벤트 루프 캡처 (스케줄러 스레드에서 사용)
+    global main_event_loop
+    main_event_loop = asyncio.get_event_loop()
 
     # 스케줄러 스레드
     t1 = threading.Thread(target=schedule_thread, daemon=True)
