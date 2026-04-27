@@ -208,21 +208,33 @@ class LongtermMonitor:
             return score, signals
 
         else:
-            # 중장기 종목 기준
+            # 중장기 종목 기준 — 장세별 유동적 판단
+            # 1. 눌림목 (조정 후 반등)
             if -30 <= drawdown <= -10:
                 score += 3
                 signals.append(f"📉 고점 대비 {drawdown:.1f}% 눌림목")
             elif -10 < drawdown <= -5:
-                score += 1
+                score += 2
                 signals.append(f"📉 고점 대비 {drawdown:.1f}% 소폭 조정")
+            elif -5 < drawdown <= 0:
+                score += 1
+                signals.append(f"📊 고점 근처 유지 중 (강세 지속)")
 
+            # 2. RSI — 강세장엔 60~75도 유효
             if 35 <= rsi <= 55:
                 score += 3
                 signals.append(f"✅ RSI {rsi:.0f} 매수 적정 구간")
-            elif 55 < rsi <= 65:
+            elif 55 < rsi <= 70:
+                score += 2
+                signals.append(f"⚠️ RSI {rsi:.0f} 강세 구간 (추세 추종)")
+            elif 70 < rsi <= 80:
                 score += 1
-                signals.append(f"⚠️ RSI {rsi:.0f} 다소 높음")
+                signals.append(f"⚠️ RSI {rsi:.0f} 다소 과열, 분할 매수")
+            elif rsi < 35:
+                score += 2
+                signals.append(f"✅ RSI {rsi:.0f} 과매도 → 반등 가능")
 
+            # 3. 거래량 증가 추세
             if vol_trend >= 1.3:
                 score += 2
                 signals.append(f"📦 거래량 증가 추세 ({vol_trend:.1f}배)")
@@ -230,10 +242,15 @@ class LongtermMonitor:
                 score += 1
                 signals.append(f"📦 거래량 소폭 증가")
 
+            # 4. 당일 거래량 급증
             if vol_ratio >= 2:
                 score += 2
                 signals.append(f"💥 당일 거래량 {vol_ratio:.1f}배 급증")
+            elif vol_ratio >= 1.5:
+                score += 1
+                signals.append(f"📦 당일 거래량 {vol_ratio:.1f}배 증가")
 
+            # 5. 5일선 위 (추세 유지)
             if above_ma5:
                 score += 1
                 signals.append("📈 5일선 위 → 단기 상승 추세")
@@ -258,7 +275,18 @@ class LongtermMonitor:
         except:
             pass
 
-        buy_signals  = []
+        # 동적 임계값 로드
+        try:
+            from modules.market_regime import MarketRegime
+            strategy      = MarketRegime().load_strategy()
+            lt_threshold  = strategy.get("kr_lt_threshold", 4)
+            avoid_sectors = strategy.get("avoid_sectors", [])
+            print(f"  📊 중장기 임계값: {lt_threshold} 회피섹터: {avoid_sectors}")
+        except:
+            lt_threshold  = 4
+            avoid_sectors = []
+
+        buy_signals    = []
         gamble_signals = []
 
         # ── 중장기 테마 스캔 ──
@@ -289,14 +317,14 @@ class LongtermMonitor:
 
                     score, signals = self._is_buy_timing(data, is_gamble=False)
 
-                    if score >= 5:
+                    if score >= lt_threshold:
                         alert_key = f"longterm_{ticker}_{market}"
                         if not self._can_alert(alert_key, cooldown_hours=24):
                             continue
-                        data['theme']      = theme_name
-                        data['score']      = score
-                        data['signals']    = signals
-                        data['type']       = '중장기'
+                        data['theme']   = theme_name
+                        data['score']   = score
+                        data['signals'] = signals
+                        data['type']    = '중장기'
                         buy_signals.append(data)
                         print(f"  🔔 중장기 타이밍: {name} (점수:{score})")
 
