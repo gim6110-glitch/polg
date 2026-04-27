@@ -25,28 +25,41 @@ class SmartRecommender:
     # ── 섹터 내 종목 수집 ──────────────────────────
 
     def _get_sector_stocks(self, sector_names):
-        """선정된 섹터의 종목 목록 추출"""
+        """선정된 섹터의 종목 목록 추출 — 유연한 매칭"""
         from modules.sector_db import SECTOR_DB
         stocks = {}
+
+        # 매칭 키워드 확장 (레이어1이 다양한 이름으로 섹터 반환)
+        keywords = set()
+        for s in sector_names:
+            keywords.add(s.lower())
+            # 부분 키워드 분리 (예: "반도체 소부장" → "반도체", "소부장")
+            for word in s.split():
+                if len(word) >= 2:
+                    keywords.add(word.lower())
 
         for sector_name, sector_data in SECTOR_DB.items():
             if sector_data.get('market', 'KR') != 'KR':
                 continue
-            # 선정된 섹터에 포함되는지 확인
-            matched = any(
-                s.lower() in sector_name.lower() or sector_name.lower() in s.lower()
-                for s in sector_names
-            )
+            sn_lower = sector_name.lower()
+            matched  = any(kw in sn_lower or sn_lower in kw for kw in keywords)
             if not matched:
                 continue
             for tier in ['대장주', '2등주', '소부장']:
-                for name, ticker in sector_data.get(tier, {}).items():
-                    stocks[ticker] = {
-                        "name":   name,
-                        "sector": sector_name,
-                        "tier":   tier,
-                    }
+                tier_data = sector_data.get(tier, {})
+                # 소부장이 중첩 딕셔너리인 경우 처리
+                if tier == '소부장' and isinstance(tier_data, dict):
+                    for sub in tier_data.values():
+                        if isinstance(sub, dict):
+                            for name, ticker in sub.items():
+                                stocks[ticker] = {"name": name, "sector": sector_name, "tier": tier}
+                        else:
+                            continue
+                else:
+                    for name, ticker in tier_data.items():
+                        stocks[ticker] = {"name": name, "sector": sector_name, "tier": tier}
 
+        print(f"  📋 섹터 매칭: {sector_names} → {len(stocks)}개 종목")
         return stocks
 
     # ── 수급 스코어링 ──────────────────────────────
@@ -226,12 +239,21 @@ class SmartRecommender:
         except Exception as e:
             print(f"  ⚠️ 수급 수집 실패: {e}")
 
+        # 장세별 임계값 — dynamic_strategy.json에서 로드 (AI가 매일 자동 조정)
+        try:
+            from modules.market_regime import MarketRegime
+            strategy = MarketRegime().load_strategy()
+            score_threshold = strategy.get("kr_score_threshold", 3)
+            print(f"  📊 동적 임계값: {score_threshold} (사이클:{strategy.get('cycle_stage','?')} 조정확률:{strategy.get('correction_prob','?')}%)")
+        except:
+            score_threshold = {"강세": 2, "중립": 3, "약세": 4}.get(regime_type, 3)
+
         # 스코어링
         candidates = []
         for ticker, info in stocks.items():
             supply_data = supply_results.get(ticker)
             data        = self._score_stock(ticker, info, supply_data)
-            if data and data['score'] >= 3:
+            if data and data['score'] >= score_threshold:
                 candidates.append(data)
             time.sleep(0.15)
 
@@ -320,7 +342,7 @@ class SmartRecommender:
                     score += 1
                     signals.append(f"📦 거래량 {vol_ratio}배")
 
-                if score >= 4:
+                if score >= 3:  # 강세장 기준 완화
                     candidates.append({
                         "name":      info["name"],
                         "ticker":    ticker,
@@ -336,6 +358,9 @@ class SmartRecommender:
             except:
                 pass
             time.sleep(0.15)
+
+        # 장세별 임계값 유동화
+        score_threshold = {"강세": 3, "중립": 4, "약세": 5}.get(regime_type, 4)
 
         candidates.sort(key=lambda x: x['score'], reverse=True)
         top10 = candidates[:10]
