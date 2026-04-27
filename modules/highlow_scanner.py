@@ -95,7 +95,9 @@ class HighLowScanner:
             return None
 
     def scan_signals(self, market="KR"):
-        signals = []
+        signals    = []
+        seen_tickers = {}  # ticker → 이미 처리된 섹터 (중복 방지)
+
         for sector_name, sector_data in SECTOR_DB.items():
             if sector_data.get("market") != market:
                 continue
@@ -105,9 +107,18 @@ class HighLowScanner:
             for cat_stocks in sector_data.get("소부장", {}).values():
                 if isinstance(cat_stocks, dict):
                     all_stocks.update(cat_stocks)
+
             for name, ticker in all_stocks.items():
+                # 이미 처리한 종목은 스킵 (중복 섹터 등록 방지)
+                if ticker in seen_tickers:
+                    continue
+                seen_tickers[ticker] = sector_name
+
                 result = self._analyze_stock(name, ticker, market)
                 if result:
+                    # 등락률 0.0% 신고가는 의미없는 신호 — 제외
+                    if result["signal_type"] == "신고가" and abs(result["change_pct"]) < 0.3:
+                        continue
                     result["sector"] = sector_name
                     signals.append(result)
                 time.sleep(0.3 if market == "KR" else 0.1)
@@ -139,10 +150,10 @@ class HighLowScanner:
 ⏰ {datetime.now().strftime("%H:%M:%S")}"""
                     messages.append(msg)
 
-        # 신고가 묶음 알림
+        # 신고가 묶음 알림 (하루 1회)
         kr_highs = [s for s in kr_signals if s["signal_type"] == "신고가"]
         if kr_highs:
-            key = f"highs_kr_{datetime.now().strftime('%Y%m%d%H')}"
+            key = f"highs_kr_{datetime.now().strftime('%Y%m%d')}"
             if self._can_alert(key, cooldown_hours=24):
                 msg = f"🏔 <b>한국 52주 신고가</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
                 for s in kr_highs[:5]:
@@ -151,7 +162,7 @@ class HighLowScanner:
 
         us_highs = [s for s in us_signals if s["signal_type"] == "신고가"]
         if us_highs:
-            key = f"highs_us_{datetime.now().strftime('%Y%m%d%H')}"
+            key = f"highs_us_{datetime.now().strftime('%Y%m%d')}"
             if self._can_alert(key, cooldown_hours=24):
                 msg = f"🏔 <b>미국 52주 신고가</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
                 for s in us_highs[:5]:
