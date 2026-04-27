@@ -202,6 +202,17 @@ class SmartRecommender:
         print(f"[{datetime.now().strftime('%H:%M')}] 🟡 07:30 단기 추천 시작")
 
         stocks      = self._get_sector_stocks(sector_names)
+
+        # ── 재무 필터 (적자 종목 제외) ──
+        try:
+            from modules.financial_filter import FinancialFilter
+            ff     = FinancialFilter()
+            stocks, removed = ff.filter_profitable(stocks, market="KR")
+            if removed:
+                print(f"  🚫 적자 제외: {', '.join(removed[:3])}")
+        except Exception as e:
+            print(f"  ⚠️ 재무 필터 실패 (전체 통과): {e}")
+
         supply_dict = {info["name"]: ticker for ticker, info in list(stocks.items())[:20]}
 
         # 수급 데이터 수집
@@ -255,6 +266,17 @@ class SmartRecommender:
         print(f"[{datetime.now().strftime('%H:%M')}] 🕑 14:30 선점 추천 시작")
 
         stocks     = self._get_sector_stocks(sector_names)
+
+        # ── 재무 필터 (적자 종목 제외) ──
+        try:
+            from modules.financial_filter import FinancialFilter
+            ff     = FinancialFilter()
+            stocks, removed = ff.filter_profitable(stocks, market="KR")
+            if removed:
+                print(f"  🚫 적자 제외: {', '.join(removed[:3])}")
+        except Exception as e:
+            print(f"  ⚠️ 재무 필터 실패 (전체 통과): {e}")
+
         candidates = []
 
         for ticker, info in stocks.items():
@@ -426,31 +448,31 @@ class SmartRecommender:
 
     # ── backtest 기록 ──────────────────────────────
 
-def _record_backtest(self, result, source, regime_type):
-    try:
-        from modules.backtest import BacktestSystem
-        bt = BacktestSystem()
-        for r in result.get('recommendations', [])[:5]:
-            score = r.get('score', 3)
-            if score >= 5:   grade = "A"
-            elif score >= 4: grade = "B"
-            elif score >= 3: grade = "C"
-            else:            grade = "D"
-            bt.record(
-                ticker       = r['ticker'],
-                name         = r['name'],
-                entry_price  = r.get('buy_price', r.get('current_price', 0)),
-                target_price = r.get('target1', 0),
-                stop_loss    = r.get('stop_loss', 0),
-                market       = "KR",
-                hold_type    = "단기",
-                source       = source,
-                regime       = regime_type,
-                grade        = grade
-            )
-        print(f"  📝 backtest 기록 완료 ({len(result.get('recommendations', []))}개)")
-    except Exception as e:
-        print(f"  ⚠️ backtest 기록 실패: {e}")
+    def _record_backtest(self, result, source, regime_type):
+        try:
+            from modules.backtest import BacktestSystem
+            bt = BacktestSystem()
+            for r in result.get('recommendations', [])[:5]:
+                score = r.get('score', 3)
+                if score >= 5:   grade = "A"
+                elif score >= 4: grade = "B"
+                elif score >= 3: grade = "C"
+                else:            grade = "D"
+                bt.record(
+                    ticker       = r['ticker'],
+                    name         = r['name'],
+                    entry_price  = r.get('buy_price', r.get('current_price', 0)),
+                    target_price = r.get('target1', 0),
+                    stop_loss    = r.get('stop_loss', 0),
+                    market       = "KR",
+                    hold_type    = "단기",
+                    source       = source,
+                    regime       = regime_type,
+                    grade        = grade
+                )
+            print(f"  📝 backtest 기록 완료 ({len(result.get('recommendations', []))}개)")
+        except Exception as e:
+            print(f"  ⚠️ backtest 기록 실패: {e}")
 
     # ── 메시지 생성 ────────────────────────────────
 

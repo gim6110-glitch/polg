@@ -1259,7 +1259,7 @@ async def short_term_recommendation():
         r = regime.current_regime
         context = await mt.select_sectors(r.get('regime', '강세'))
         if not context:
-            await send("❌ 시장 분석 실패")
+            print("  ⚠️ 시장 분석 실패 - 스킵")
             return
 
         # 시장 온도 브리핑 발송
@@ -1759,15 +1759,172 @@ async def us_pre_trading_briefing():
         print(f"  ❌ 미국장 브리핑 실패: {e}")
 
 async def nxt_analysis():
-    """08:00 NXT 분석"""
-    print(f"[{datetime.now().strftime('%H:%M')}] 🌅 NXT 분석")
+    """08:30 NXT 분석 — 08:00~08:30 실제 NXT 등락률 기반"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🌅 NXT 분석 시작")
     try:
-        from modules.premarket_futures import PremarketFutures
-        pf       = PremarketFutures()
-        analysis = await pf.analyze_kr_nxt()
-        msg      = pf.build_kr_message(analysis)
+        from modules.kis_api import KISApi
+        from modules.sector_db import SECTOR_DB
+        from anthropic import Anthropic
+        import re, json as _json
+
+        kis    = KISApi()
+        client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+        # ① 섹터별 NXT 등락률 수집
+        print("  📊 NXT 종목 수집 중...")
+        nxt_strong = []
+        nxt_weak   = []
+
+        for sector_name, sector_data in SECTOR_DB.items():
+            if sector_data.get('market') != 'KR':
+                continue
+            for tier in ['대장주', '2등주']:
+                for name, ticker in sector_data.get(tier, {}).items():
+                    data = kis.get_kr_price(ticker)
+                    if not data:
+                        continue
+                    change = data.get('change_pct', 0)
+                    price  = data.get('price', 0)
+                    volume = data.get('volume', 0)
+                    if change >= 0.5:
+                        nxt_strong.append({
+                            "name": name, "ticker": ticker,
+                            "sector": sector_name, "tier": tier,
+                            "change": change, "price": price, "volume": volume
+                        })
+                    elif change <= -0.5:
+                        nxt_weak.append({
+                            "name": name, "ticker": ticker,
+                            "sector": sector_name, "tier": tier,
+                            "change": change, "price": price, "volume": volume
+                        })
+                    time.sleep(0.15)
+
+        nxt_strong.sort(key=lambda x: x['change'], reverse=True)
+        nxt_weak.sort(key=lambda x: x['change'])
+
+        # ② 뉴스
+        nc       = NewsCollector()
+        news     = nc.collect_news(max_per_feed=3)
+        filtered = nc.filter_by_importance(news)
+        news_text = "\n".join([
+            f"{'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:50]}"
+            for n in filtered[:8]
+        ])
+
+        # ③ AI 판단
+        strong_text = "\n".join([
+            f"{s['name']}({s['ticker']}) {s['sector']}/{s['tier']}: {s['change']:+.1f}% 거래량:{s['volume']:,}"
+            for s in nxt_strong[:8]
+        ]) or "없음"
+        weak_text = "\n".join([
+            f"{s['name']}({s['ticker']}): {s['change']:+.1f}%"
+            for s in nxt_weak[:5]
+        ]) or "없음"
+
+        prompt = f"""NXT(08:00~08:30) 실제 등락률 데이터를 분석해서 정규장 전략을 알려주세요.
+마크다운 금지. 텍스트와 이모지만.
+
+=== NXT 강세 종목 ===
+{strong_text}
+
+=== NXT 약세 종목 ===
+{weak_text}
+
+=== 오늘 뉴스 ===
+{news_text}
+
+분석:
+1. NXT 강세 섹터 흐름 판단 (진짜 상승 vs 흔들기)
+2. 정규장에서 파급 효과 기대 종목 TOP5
+   - NXT 강세 섹터의 아직 안 오른 2등주/소부장 우선
+3. 주의 종목
+
+JSON으로만:
+{{
+  "market_outlook": "오늘 정규장 한줄 예측",
+  "nxt_summary": "NXT 흐름 한줄 요약",
+  "real_movers": ["진짜 상승 종목1", "종목2"],
+  "fake_movers": ["흔들기 의심 종목"],
+  "recommendations": [
+    {{
+      "name": "종목명",
+      "ticker": "티커",
+      "sector": "섹터",
+      "reason": "추천 이유 한줄",
+      "current_price": 0,
+      "buy_price": 0,
+      "target1": 0,
+      "target2": 0,
+      "stop_loss": 0,
+      "buy_timing": "NXT 매수 또는 정규장 초반"
+    }}
+  ],
+  "caution": "주의사항"
+}}"""
+
+        res    = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text   = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
+        m      = re.search(r'\{.*\}', text, re.DOTALL)
+        result = _json.loads(m.group()) if m else None
+
+        # ④ 메시지 생성
+        msg = f"🌅 <b>NXT 분석 → 정규장 선점</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
+
+        if nxt_strong:
+            msg += "📈 <b>NXT 강세</b>\n"
+            for s in nxt_strong[:5]:
+                msg += f"  ▲ {s['name']} ({s['ticker']}): {s['change']:+.1f}% [{s['sector']}]\n"
+        else:
+            msg += "📊 NXT 특이 움직임 없음\n"
+
+        if nxt_weak:
+            msg += "\n📉 <b>NXT 약세</b>\n"
+            for s in nxt_weak[:3]:
+                msg += f"  ▼ {s['name']} ({s['ticker']}): {s['change']:+.1f}%\n"
+
+        if result:
+            msg += f"\n💡 <b>오늘 전망</b>: {result.get('market_outlook', '')}\n"
+            msg += f"📊 <b>NXT 흐름</b>: {result.get('nxt_summary', '')}\n"
+
+            real = result.get('real_movers', [])
+            fake = result.get('fake_movers', [])
+            if real:
+                msg += f"✅ 진짜 상승: {', '.join(real)}\n"
+            if fake:
+                msg += f"⚠️ 흔들기 주의: {', '.join(fake)}\n"
+
+            recs = result.get('recommendations', [])
+            if recs:
+                msg += "\n━━━━━━━━━━━━━━━━━━━\n"
+                msg += "🎯 <b>정규장 선점 추천</b>\n\n"
+                for r in recs[:5]:
+                    def fmt(val):
+                        try: return f"{int(val):,}원"
+                        except: return "?"
+                    msg += f"⭐ <b>{r['name']}</b> ({r['ticker']})\n"
+                    msg += f"   {r['reason']}\n"
+                    msg += f"   💰 현재가: {fmt(r.get('current_price',0))}\n"
+                    msg += f"   🟢 매수가: {fmt(r.get('buy_price',0))}\n"
+                    msg += f"   ⏱ 진입:   {r.get('buy_timing','')}\n"
+                    msg += f"   🎯 목표1:  {fmt(r.get('target1',0))}\n"
+                    msg += f"   🎯 목표2:  {fmt(r.get('target2',0))}\n"
+                    msg += f"   🛑 손절:   {fmt(r.get('stop_loss',0))}\n"
+                    msg += "━━━━━━━━━━━━━━━━━━━\n"
+
+            caution = result.get('caution', '')
+            if caution:
+                msg += f"\n⚠️ {caution}\n"
+
+        msg += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         await send(msg)
-        print("  ✅ NXT 분석 완료")
+        print(f"  ✅ NXT 분석 완료 (강세:{len(nxt_strong)}개 약세:{len(nxt_weak)}개)")
     except Exception as e:
         print(f"  ❌ NXT 분석 실패: {e}")
 
@@ -1894,9 +2051,13 @@ async def intraday_scan():
 
 # ── 스케줄 스레드 ──
 def run_schedule_job(coro_func):
-    """스케줄 작업 안전 실행 - 에러나도 계속 동작"""
+    """스케줄 작업 안전 실행 - run_polling 루프와 공존"""
     try:
-        asyncio.run(coro_func())
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro_func(), loop)
+        else:
+            loop.run_until_complete(coro_func())
     except Exception as e:
         print(f"⚠️ 스케줄 작업 에러 ({coro_func.__name__}): {e}")
 
@@ -2164,19 +2325,20 @@ async def monday_weekly_briefing():
         client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         prompt = f"""이번 주 한국/미국 주식 투자 전략을 알려주세요.
 직장인 투자자 맞춤 (정규장 09:00 진입 불가, NXT 활용)
- 
+마크다운 금지. 테이블 금지. 헤더(##) 금지. 텍스트와 이모지만 사용.
+
 === 장세 ===
 {r.get('regime', '?')}장
- 
+
 === 이번 주 유망 섹터 ===
 {sector_text}
- 
+
 === 주말 주요 뉴스 ===
 {news_text}
- 
-다음을 간단히:
+
+다음을 간단히 텍스트로:
 1. 이번 주 시장 키워드 3개
-2. 이번 주 전략 (공격/중립/방어)
+2. 이번 주 전략 (공격/중립/방어) + 이유 한줄
 3. 주목할 한국 섹터 2개 + 이유
 4. 주목할 미국 섹터/종목 1개 + 이유
 5. 이번 주 주의사항
@@ -2260,11 +2422,21 @@ def schedule_thread():
     schedule.every().day.at("20:30").do(run_schedule_job, us_pre_trading_briefing)
     schedule.every().day.at("21:00").do(run_schedule_job, us_premarket_analysis)
     schedule.every().day.at("23:30").do(run_schedule_job, us_lowpoint_scan)
-    # 실시간
-    schedule.every(30).minutes.do(run_schedule_job, intraday_scan)
-    schedule.every(30).minutes.do(run_schedule_job, longterm_scan)
-    schedule.every(30).minutes.do(run_schedule_job, highlow_scan)
-    schedule.every(30).minutes.do(run_schedule_job, backtest_price_check)
+    # 실시간 (2분씩 엇갈려서 라즈베리파이 부하 분산)
+    # intraday_scan: :00, :30
+    # longterm_scan:  :02, :32
+    # highlow_scan:   :04, :34
+    # backtest_check: :06, :36
+    for h in range(24):
+        hh = f"{h:02d}"
+        schedule.every().day.at(f"{hh}:00").do(run_schedule_job, intraday_scan)
+        schedule.every().day.at(f"{hh}:30").do(run_schedule_job, intraday_scan)
+        schedule.every().day.at(f"{hh}:02").do(run_schedule_job, longterm_scan)
+        schedule.every().day.at(f"{hh}:32").do(run_schedule_job, longterm_scan)
+        schedule.every().day.at(f"{hh}:04").do(run_schedule_job, highlow_scan)
+        schedule.every().day.at(f"{hh}:34").do(run_schedule_job, highlow_scan)
+        schedule.every().day.at(f"{hh}:06").do(run_schedule_job, backtest_price_check)
+        schedule.every().day.at(f"{hh}:36").do(run_schedule_job, backtest_price_check)
     
     # 주말 스케줄
     schedule.every().saturday.at("06:00").do(run_schedule_job, weekend_us_closing)

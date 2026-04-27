@@ -17,18 +17,45 @@ class SectorRotation:
         self.kis           = KISApi()
         self.rotation_file = "/home/dps/stock_ai/data/sector_rotation.json"
 
+    def _is_market_open(self, market="KR"):
+        """장 운영 시간 여부"""
+        now  = datetime.now()
+        hour = now.hour
+        wday = now.weekday()
+        if wday >= 5:  # 주말
+            return False
+        if market == "KR":
+            return 8 <= hour < 18
+        else:
+            return hour >= 21 or hour < 6
+
     def _get_change_rate(self, ticker, market="KR"):
-        """종목 등락률 조회"""
+        """종목 등락률 조회 — 장 마감/주말 시 yfinance 전일 종가 기준"""
+        # 장중이면 KIS 실시간
+        if self._is_market_open(market):
+            try:
+                if market == "KR":
+                    data = self.kis.get_kr_price(ticker)
+                else:
+                    data = None
+                    for excd in ["NAS", "NYS"]:
+                        data = self.kis.get_us_price(ticker, excd)
+                        if data and data.get('price', 0) > 0:
+                            break
+                if data and data.get('change_pct', 0) != 0:
+                    return data.get('change_pct', 0)
+            except:
+                pass
+
+        # 장 마감 / 주말 → yfinance 전일 종가 기준 등락률
         try:
-            if market == "KR":
-                data = self.kis.get_kr_price(ticker)
-            else:
-                for excd in ["NAS", "NYS"]:
-                    data = self.kis.get_us_price(ticker, excd)
-                    if data and data.get('price', 0) > 0:
-                        break
-            if data:
-                return data.get('change_pct', 0)
+            import yfinance as yf
+            yf_ticker = f"{ticker}.KS" if market == "KR" else ticker
+            hist = yf.Ticker(yf_ticker).history(period="5d").dropna()
+            if len(hist) >= 2:
+                prev = hist['Close'].iloc[-2]
+                last = hist['Close'].iloc[-1]
+                return round((last - prev) / prev * 100, 2)
         except:
             pass
         return 0
@@ -195,9 +222,11 @@ JSON으로만 답변:
         hot_sectors  = hot_info.get("hot_sectors", [])
         next_sectors = hot_info.get("next_sectors", [])
         reason       = hot_info.get("reason", "")
+        market_open  = self._is_market_open(market)
+        price_label  = "실시간" if market_open else "전일 종가 기준"
 
         msg = f"""{flag} <b>{"한국" if market=="KR" else "미국"} 순환매 전략</b> {datetime.now().strftime('%m/%d')}
-
+📊 <i>({price_label})</i>
 🔥 <b>오늘 핫섹터:</b> {' / '.join(hot_sectors)}
 📋 {reason}
 

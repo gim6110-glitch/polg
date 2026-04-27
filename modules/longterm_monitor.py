@@ -262,9 +262,27 @@ class LongtermMonitor:
         gamble_signals = []
 
         # ── 중장기 테마 스캔 ──
+        # 재무 필터 초기화 (적자 종목 제외, 도박은 별도)
+        try:
+            from modules.financial_filter import FinancialFilter
+            ff = FinancialFilter()
+        except Exception:
+            ff = None
+
         for theme_name, markets in self.themes.items():
             for market, stocks in markets.items():
                 for name, ticker in stocks.items():
+
+                    # 재무 필터: 적자 종목 제외 (도박 아닌 중장기만)
+                    if ff:
+                        try:
+                            if not ff.is_profitable(ticker, market):
+                                print(f"  🚫 적자 제외: {name} ({ticker})")
+                                time.sleep(0.1)
+                                continue
+                        except Exception:
+                            pass
+
                     data = self._analyze_stock(name, ticker, market)
                     if not data:
                         continue
