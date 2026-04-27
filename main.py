@@ -177,6 +177,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /leverage — 레버리지 ETF 현황
 /premarket — 상한가 후보 즉시 스캔
 
+🎯 <b>추천 (즉시 실행)</b>
+/recommend — 단기 추천 지금 받기
+/longterm — 중장기 매수 타이밍 지금 확인
+
 💼 <b>포트폴리오</b>
 /portfolio — 전체 현황
 /buy 종목명 티커 매수가 수량
@@ -1098,6 +1102,27 @@ async def cmd_supply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send(msg)
         else:
             await update.message.reply_text("ℹ️ 현재 특이 수급 신호 없음")
+    except Exception as e:
+        await update.message.reply_text(f"❌ 실패: {e}")
+
+async def cmd_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """단기 추천 즉시 실행 (/recommend)"""
+    await update.message.reply_text("📈 단기 추천 분석 중... (1~2분 소요)")
+    await short_term_recommendation()
+
+async def cmd_longterm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """중장기 타이밍 즉시 확인 (/longterm)"""
+    await update.message.reply_text("🔔 중장기 타이밍 확인 중...")
+    try:
+        nc      = NewsCollector()
+        news    = nc.collect_news(max_per_feed=3)
+        signals = await ltm.scan_all_themes(news)
+        if signals:
+            msg = ltm.build_alert_message(signals)
+            if msg:
+                await send(msg)
+        else:
+            await update.message.reply_text("ℹ️ 현재 중장기 매수 타이밍 없음")
     except Exception as e:
         await update.message.reply_text(f"❌ 실패: {e}")
 
@@ -2501,68 +2526,72 @@ def main():
     print(f"{em} 장세: {r['regime']}장")
     print(f"⚔️ 전략: {params['description']}")
 
-    # 메인 이벤트 루프 캡처 (스케줄러 스레드에서 사용)
-    global main_event_loop
-    main_event_loop = asyncio.get_event_loop()
-
-    # 스케줄러 스레드
-    t1 = threading.Thread(target=schedule_thread, daemon=True)
-    t1.start()
-
-    # 실시간 모니터 스레드
+    # 실시간 모니터 스레드 (자체 루프)
     t2 = threading.Thread(target=realtime_thread, daemon=True)
     t2.start()
 
     from modules.sector_db import get_all_tickers as _gat
     _kr = len(_gat('KR'))
     _us = len(_gat('US'))
-    asyncio.run(send(f"""🚀 <b>주식 AI 에이전트 v4.0 가동!</b>
+
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    app   = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("status",     cmd_status))
+    app.add_handler(CommandHandler("regime",     cmd_regime))
+    app.add_handler(CommandHandler("list",       cmd_list))
+    app.add_handler(CommandHandler("add",        cmd_add))
+    app.add_handler(CommandHandler("remove",     cmd_remove))
+    app.add_handler(CommandHandler("check",      cmd_check))
+    app.add_handler(CommandHandler("market",     cmd_market))
+    app.add_handler(CommandHandler("scan",       cmd_scan))
+    app.add_handler(CommandHandler("trend",      cmd_trend))
+    app.add_handler(CommandHandler("briefing",   cmd_briefing))
+    app.add_handler(CommandHandler("supply",     cmd_supply))
+    app.add_handler(CommandHandler("portfolio",  cmd_portfolio))
+    app.add_handler(CommandHandler("buy",        cmd_buy))
+    app.add_handler(CommandHandler("sell",       cmd_sell))
+    app.add_handler(CommandHandler("diagnosis",  cmd_diagnosis))
+    app.add_handler(CommandHandler("news_impact",cmd_news_impact))
+    app.add_handler(CommandHandler("accuracy",   cmd_accuracy))
+    app.add_handler(CommandHandler("premarket",  cmd_premarket))
+    app.add_handler(CommandHandler("leverage",   cmd_leverage))
+    app.add_handler(CommandHandler("themes",     cmd_themes))
+    app.add_handler(CommandHandler("add_sector", cmd_add_sector))
+    app.add_handler(CommandHandler("gamble",     cmd_gamble))
+    app.add_handler(CommandHandler("backtest",   cmd_backtest))
+    app.add_handler(CommandHandler("buy_rate",   cmd_buy_rate))
+    app.add_handler(CommandHandler("loss",       cmd_loss))
+    app.add_handler(CommandHandler("analyze",    cmd_analyze))
+    app.add_handler(CommandHandler("recommend",  cmd_recommend))
+    app.add_handler(CommandHandler("longterm",   cmd_longterm))
+
+    async def error_handler(update, context):
+        print(f"⚠️ 텔레그램 에러: {context.error}")
+
+    app.add_error_handler(error_handler)
+
+    async def post_init(application):
+        """run_polling 시작 후 루프 캡처 → 스케줄러 스레드 시작"""
+        global main_event_loop
+        main_event_loop = asyncio.get_event_loop()
+
+        # 스케줄러 스레드 시작 (루프 캡처 후에 시작해야 함)
+        t1 = threading.Thread(target=schedule_thread, daemon=True)
+        t1.start()
+
+        # 가동 알림
+        await send(f"""🚀 <b>주식 AI 에이전트 v4.0 가동!</b>
 
 {em} 장세: <b>{r['regime']}장</b>
 ⚔️ {params['description']}
 ⚡ 실시간 모니터: 5분마다 감시
 🤖 Claude Sonnet 4.6
 📊 한국 {_kr}개 + 미국 {_us}개 종목 감시
-📱 /start 명령어 확인"""))
+📱 /start 명령어 확인""")
 
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
-    app   = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start",    cmd_start))
-    app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("regime",   cmd_regime))
-    app.add_handler(CommandHandler("list",     cmd_list))
-    app.add_handler(CommandHandler("add",      cmd_add))
-    app.add_handler(CommandHandler("remove",   cmd_remove))
-    app.add_handler(CommandHandler("check",    cmd_check))
-    app.add_handler(CommandHandler("market",   cmd_market))
-    app.add_handler(CommandHandler("scan",     cmd_scan))
-    app.add_handler(CommandHandler("trend",    cmd_trend))
-    app.add_handler(CommandHandler("briefing", cmd_briefing))
-    app.add_handler(CommandHandler("supply",     cmd_supply))
-    app.add_handler(CommandHandler("portfolio",  cmd_portfolio))
-    app.add_handler(CommandHandler("buy",        cmd_buy))
-    app.add_handler(CommandHandler("sell",       cmd_sell))
-    app.add_handler(CommandHandler("diagnosis",  cmd_diagnosis))
-    app.add_handler(CommandHandler("news_impact", cmd_news_impact))
-    app.add_handler(CommandHandler("accuracy",    cmd_accuracy))
-    app.add_handler(CommandHandler("premarket",   cmd_premarket))
-    app.add_handler(CommandHandler("leverage",    cmd_leverage))
-    app.add_handler(CommandHandler("themes",      cmd_themes))
-    app.add_handler(CommandHandler("add_sector",  cmd_add_sector))
-    app.add_handler(CommandHandler("gamble", cmd_gamble))
-    app.add_handler(CommandHandler("backtest", cmd_backtest))
-    app.add_handler(CommandHandler("buy_rate", cmd_buy_rate))
-    app.add_handler(CommandHandler("loss", cmd_loss))
-    app.add_handler(CommandHandler("analyze", cmd_analyze))
-
+    app.post_init = post_init
     print("🤖 봇 대기 중...")
-
-    async def error_handler(update, context):
-        print(f"⚠️ 텔레그램 에러: {context.error}")
-        # 네트워크 에러면 5초 후 재시도
-        await asyncio.sleep(5)
-
-    app.add_error_handler(error_handler)
     print("✅ 텔레그램 봇 시작")
     app.run_polling(drop_pending_updates=True)
 
