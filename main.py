@@ -214,8 +214,6 @@ async def backtest_price_check():
         print(f"  ❌ 백테스트 체크 실패: {e}")
 
 async def cmd_regime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📊 장세 분석 중...")
-    regime.analyze_regime_sync()
     await send(regime.get_status_text())
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1384,7 +1382,7 @@ async def closing_summary():
 async def closing_summary_old():
     print(f"[{datetime.now().strftime('%H:%M')}] 📋 마감")
     try:
-        r      = regime.analyze_regime_sync()
+        r      = regime.current_regime
         em     = regime.get_regime_emoji()
         prices = PriceCollector().get_all_prices()
         kr     = prices.get('한국주식', {})
@@ -2495,7 +2493,7 @@ def main():
     print("=" * 50)
     print("🚀 주식 AI 에이전트 v4.0")
     print("=" * 50)
-    r      = regime.analyze_regime_sync()
+    r      = regime.current_regime
     params = regime.get_strategy_params()
     em     = regime.get_regime_emoji()
     print(f"{em} 장세: {r['regime']}장")

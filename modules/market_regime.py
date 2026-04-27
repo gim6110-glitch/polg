@@ -637,13 +637,8 @@ position_size: 100=정상, 70=축소, 130=확대"""
     # ── 하위 호환 (동기 버전) ──────────────────────
 
     def analyze_regime_sync(self):
-        """기존 동기 코드 호환용"""
-        import asyncio
-        try:
-            return asyncio.run(self.analyze_regime())
-        except Exception as e:
-            print(f"⚠️ 동기 분석 실패: {e}")
-            return self.current_regime
+        """기존 동기 코드 호환용 - 저장된 값 즉시 반환"""
+        return self.current_regime
 
     # ── 전략 파라미터 ──────────────────────────────
 
