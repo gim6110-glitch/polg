@@ -421,7 +421,10 @@ class MarketRegime:
 
             history_text = ""
             for h in history[-5:]:
-                history_text += f"{h['date']}: {h.get('cycle_stage','')} 조정확률{h.get('correction_prob','')}% {h.get('ai_strategy','')[:40]}\n"
+                if not h:
+                    continue
+                date_str = h.get('date') or h.get('timestamp', '')[:10] or '날짜없음'
+                history_text += f"{date_str}: {h.get('cycle_stage','')} 조정확률{h.get('correction_prob','')}% {h.get('ai_strategy','')[:40]}\n"
 
             anomalies = []
             if kr_signals.get('vol_divergence'): anomalies.append("한국 거래량 Divergence")
