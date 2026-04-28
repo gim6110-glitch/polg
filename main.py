@@ -190,6 +190,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 <b>추천 (즉시 실행)</b>
 /recommend — 단기 추천 지금 받기
 /longterm — 중장기 매수 타이밍 지금 확인
+/bigtech — 빅테크 저점/버블 즉시 점검
 
 📋 <b>감시 목록</b>
 /list — 감시 종목
@@ -1395,8 +1396,8 @@ async def nxt_closing_summary():
     try:
         from modules.premarket_futures import PremarketFutures
 
-        pf       = PremarketFutures()
-        analysis = await pf.analyze_kr_nxt()
+        pf_nxt   = PremarketFutures()
+        analysis = await pf_nxt.analyze_kr_nxt()
         hot  = [(n, d) for n, d in analysis.get('hot_sectors', []) if d['avg_change'] >= 1]
         down = [(n, d) for n, d in analysis.get('hot_sectors', []) if d['avg_change'] <= -1]
         now  = datetime.now()
@@ -1688,8 +1689,7 @@ async def nxt_realtime_scan():
         sr        = SectorRotation()
         watchlist = sr.get_watchlist_for_realtime("KR")
 
-        # 장기 대장주 추가
-        from main import LONG_TERM_STOCKS
+        # 장기 대장주 추가 (전역 변수 직접 참조, self-import 금지)
         kr_long = {k: v for k, v in LONG_TERM_STOCKS.items()
                    if not v.startswith('NV') and not v.startswith('AA')
                    and not v.startswith('MS') and len(v) == 6}
@@ -2466,6 +2466,190 @@ async def monday_weekly_briefing():
     except Exception as e:
         print(f"  ❌ 월요일 브리핑 실패: {e}")
 
+# ── 신규 스케줄 함수 4개 ─────────────────────────────────────────
+
+async def market_regime_analysis():
+    """07:00 장세 분석 → dynamic_strategy.json 자동 생성"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🔭 07:00 장세 분석 시작")
+    try:
+        from modules.market_regime import MarketRegime as _MR
+        import json as _json
+
+        mr     = _MR()
+        r      = mr.current_regime          # 기존 저장값 즉시 읽기
+        cycle  = r.get('cycle', r.get('regime', '알 수 없음'))
+        em     = mr.get_regime_emoji()
+
+        # dynamic_strategy.json 저장
+        strategy = {
+            "date":                   datetime.now().strftime('%Y-%m-%d'),
+            "cycle":                  cycle,
+            "regime":                 r.get('regime', '?'),
+            "correction_probability": r.get('correction_prob', 30),
+            "recommended_position":   r.get('position', 80),
+            "kr_regime":              r.get('kr_regime', '중립'),
+            "us_regime":              r.get('us_regime', '중립'),
+        }
+        strategy_path = '/media/dps/T7/stock_ai/dynamic_strategy.json'
+        with open(strategy_path, 'w', encoding='utf-8') as f:
+            _json.dump(strategy, f, ensure_ascii=False, indent=2)
+
+        msg = (
+            f"[07:00 장세 분석]\n"
+            f"{em} 사이클: {cycle}\n"
+            f"조정확률: {strategy['correction_probability']}%\n"
+            f"권장 포지션: {strategy['recommended_position']}%\n"
+            f"🇰🇷 한국: {strategy['kr_regime']}장 | 🇺🇸 미국: {strategy['us_regime']}장\n"
+            f"dynamic_strategy.json 저장 완료"
+        )
+        await send(msg)
+        print("  ✅ 07:00 장세 분석 완료")
+    except Exception as e:
+        print(f"  ❌ 07:00 장세 분석 실패: {e}")
+
+
+async def conviction_recommend():
+    """09:40 확신 추천 — NXT + 정규장 초반 방향 확인 후"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🎯 09:40 확신 추천 시작")
+    try:
+        r = regime.current_regime
+
+        # 캐시된 컨텍스트 사용 (아침 섹터 선정 재활용)
+        context = mt.get_current_context()
+        if not context:
+            context = await mt.select_sectors(r.get('regime', '강세'))
+        if not context:
+            print("  ⚠️ 시장 분석 실패 - 스킵")
+            return
+
+        # 매매 가드 체크
+        total, _ = tg.get_total_assets(pf.portfolio)
+        is_blocked, blocked, warnings = tg.full_check(context, total)
+        if is_blocked:
+            guard_msg = tg.build_guard_message(is_blocked, blocked, warnings)
+            await send(guard_msg)
+            return
+
+        # 확신 추천: recommend_conviction (임계값 +1 엄격 적용)
+        sector_names = mt.get_selected_sector_names()
+        result = await sr.recommend_conviction(
+            sector_names,
+            r.get('regime', '강세'),
+            context
+        )
+        if result:
+            msg = sr.build_message(result, "09:40확신")
+            header = f"🎯 <b>09:40 확신 추천</b> (정규장 초반 방향 확인 후)\n\n"
+            await send(header + msg)
+        else:
+            await send("📊 [09:40 확신 추천] 조건 충족 종목 없음 → 관망")
+
+        print("  ✅ 09:40 확신 추천 완료")
+    except Exception as e:
+        print(f"  ❌ 09:40 확신 추천 실패: {e}")
+
+
+async def afternoon_nxt_recommend():
+    """16:30 오후 NXT — 내일 오를 종목 저점 포착"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🌆 16:30 오후 NXT 선점 시작")
+    try:
+        r = regime.current_regime
+
+        context = mt.get_current_context()
+        if not context:
+            context = await mt.select_sectors(r.get('regime', '강세'))
+
+        sector_names = mt.get_selected_sector_names()
+        # 오후 NXT 선점은 afternoon 로직 재활용
+        result = await sr.recommend_afternoon(
+            sector_names,
+            r.get('regime', '강세'),
+            context
+        )
+        if result:
+            msg = sr.build_message(result, "16:30NXT선점")
+            header = f"🌆 <b>16:30 오후 NXT 선점</b> (내일 저점 포착)\n\n"
+            await send(header + msg)
+        else:
+            await send("📊 [16:30 오후 NXT] 선점 후보 없음 → 관망")
+
+        print("  ✅ 16:30 오후 NXT 선점 완료")
+    except Exception as e:
+        print(f"  ❌ 16:30 오후 NXT 실패: {e}")
+
+
+async def us_short_term_recommend():
+    """23:30 미국 단기 추천 — 초반 방향 확인 후 (기존 대형주 저점과 별개)"""
+    if is_weekend():
+        return
+    print(f"[{datetime.now().strftime('%H:%M')}] 🌙 23:30 미국 단기 추천 시작")
+    try:
+        r = regime.current_regime
+
+        nc       = NewsCollector()
+        news     = nc.collect_news(max_per_feed=3)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]
+
+        macro  = await ma.analyze_macro_context(filtered)
+        result = await sr.analyze_and_recommend(
+            filtered,
+            r.get('regime', '강세'),
+            "23:30단기",
+            macro
+        )
+        msg       = sr.build_message(result, "23:30단기")
+        header    = f"🌙 <b>23:30 미국 단기 추천</b> (개장 초반 방향 확인)\n\n"
+        full_msg  = header
+        if macro.get('us_strategy'):
+            full_msg += f"🇺🇸 {macro.get('us_strategy', '')}\n\n"
+        full_msg += msg
+        await send(full_msg)
+        print("  ✅ 23:30 미국 단기 추천 완료")
+    except Exception as e:
+        print(f"  ❌ 23:30 미국 단기 추천 실패: {e}")
+
+
+# ── 빅테크 모니터 스케줄 함수 ─────────────────────────────────────
+
+async def bigtech_monitor_run():
+    """09:00, 22:00 빅테크 모니터 실행"""
+    if is_weekend() and datetime.now().hour == 9:
+        return  # 주말 한국장 시간은 스킵, 22:00은 미국장이므로 주말도 실행
+    print(f"[{datetime.now().strftime('%H:%M')}] 📡 빅테크 모니터 실행")
+    try:
+        from modules.bigtech_monitor import analyze_bigtech
+        summary = await analyze_bigtech(send)
+        if summary:
+            await send(summary)
+        print("  ✅ 빅테크 모니터 완료")
+    except ImportError:
+        print("  ⚠️ bigtech_monitor 모듈 없음 - 스킵")
+    except Exception as e:
+        print(f"  ❌ 빅테크 모니터 실패: {e}")
+
+
+# ── 이상 신호 감지 스케줄 함수 ────────────────────────────────────
+
+async def anomaly_check():
+    """30분마다 장중/미국장 이상 신호 감지 (규칙 기반, AI 호출 없음)"""
+    try:
+        from modules.anomaly_detector import check_anomalies
+        await check_anomalies(send, trigger_regime_func=market_regime_analysis)
+    except ImportError:
+        pass  # 모듈 없으면 조용히 스킵
+    except Exception as e:
+        print(f"  ❌ 이상 신호 감지 실패: {e}")
+
+
 # 스케줄 함수 추가 (schedule_thread 위에)
 async def gamble_weekly_review():
     """토요일 12:00 도박 watchlist AI 검토"""
@@ -2504,7 +2688,8 @@ def schedule_thread():
     schedule.every().day.at("00:00").do(run_schedule_job, update_event_calendar)
     # 새벽
     schedule.every().day.at("05:00").do(run_schedule_job, premarket_morning_scan)
-    # 아침
+    # 아침 — 07:00 장세 분석 먼저, 그 다음 브리핑
+    schedule.every().day.at("07:00").do(run_schedule_job, market_regime_analysis)
     schedule.every().day.at("06:00").do(run_schedule_job, run_daily_rotation)
     schedule.every().day.at("07:00").do(run_schedule_job, morning_briefing)
     schedule.every().day.at("07:00").do(run_schedule_job, earnings_check)
@@ -2516,19 +2701,24 @@ def schedule_thread():
     schedule.every().day.at("08:10").do(run_schedule_job, risk_analysis)
     schedule.every().day.at("08:30").do(run_schedule_job, nxt_analysis)
     # 장중
+    schedule.every().day.at("09:00").do(run_schedule_job, bigtech_monitor_run)
     schedule.every().day.at("09:05").do(run_schedule_job, run_supply_scan)
     schedule.every().day.at("09:05").do(run_schedule_job, dart_scan)
+    schedule.every().day.at("09:40").do(run_schedule_job, conviction_recommend)
     schedule.every().day.at("13:00").do(run_schedule_job, run_supply_scan)
     schedule.every().day.at("13:00").do(run_schedule_job, dart_scan)
     # 장마감
     schedule.every().day.at("14:30").do(run_schedule_job, afternoon_recommendation)
     schedule.every().day.at("15:40").do(run_schedule_job, closing_summary)
+    schedule.every().day.at("16:30").do(run_schedule_job, afternoon_nxt_recommend)
     # 저녁
     schedule.every().day.at("19:50").do(run_schedule_job, nxt_closing_summary)
     # 미국장
     schedule.every().day.at("20:30").do(run_schedule_job, us_pre_trading_briefing)
     schedule.every().day.at("21:00").do(run_schedule_job, us_premarket_analysis)
+    schedule.every().day.at("22:00").do(run_schedule_job, bigtech_monitor_run)
     schedule.every().day.at("23:30").do(run_schedule_job, us_lowpoint_scan)
+    schedule.every().day.at("23:30").do(run_schedule_job, us_short_term_recommend)
     # 실시간 (2분씩 엇갈려서 라즈베리파이 부하 분산)
     # intraday_scan: :00, :30
     # longterm_scan:  :02, :32
@@ -2544,6 +2734,9 @@ def schedule_thread():
         schedule.every().day.at(f"{hh}:34").do(run_schedule_job, highlow_scan)
         schedule.every().day.at(f"{hh}:06").do(run_schedule_job, backtest_price_check)
         schedule.every().day.at(f"{hh}:36").do(run_schedule_job, backtest_price_check)
+        # 이상 신호 감지 (규칙 기반, AI 호출 없음) — :08/:38
+        schedule.every().day.at(f"{hh}:08").do(run_schedule_job, anomaly_check)
+        schedule.every().day.at(f"{hh}:38").do(run_schedule_job, anomaly_check)
     
     # 주말 스케줄
     schedule.every().saturday.at("06:00").do(run_schedule_job, weekend_us_closing)
@@ -2558,19 +2751,25 @@ def schedule_thread():
     print("✅ 스케줄 등록 완료")
     print("  05:00 상한가 후보")
     print("  06:00 순환매 분석")
+    print("  07:00 장세 분석 (dynamic_strategy.json 자동 생성)")
     print("  07:00 매크로 브리핑 + 실적 체크")
     print("  07:30 한국 단기 추천")
     print("  08:00 미국장 마감 분석 + 헬스체크")
     print("  08:10 포트폴리오 진단 + 리스크 분석")
     print("  08:30 NXT 분석 (NXT 데이터 쌓인 후)")
+    print("  09:00 빅테크 모니터")
     print("  09:05 수급 + DART 공시")
+    print("  09:40 확신 추천 (정규장 초반 방향 확인 후)")
     print("  13:00 수급 + DART 공시")
     print("  14:30 내일 선점 추천")
     print("  15:40 마감 분석 + 내일 추천")
+    print("  16:30 오후 NXT 선점 추천")
     print("  19:50 NXT 마감 요약")
     print("  20:30 미국장 전 브리핑")
     print("  21:00 미국 프리마켓")
-    print("  30분마다 장중스캔+포트폴리오+중장기+신고가")
+    print("  22:00 빅테크 모니터")
+    print("  23:30 미국 대형주 저점 + 미국 단기 추천")
+    print("  30분마다 장중스캔+포트폴리오+중장기+신고가+이상신호감지")
     print("✅ 스케줄 등록")
     while True:
         schedule.run_pending()
@@ -2586,6 +2785,26 @@ def realtime_thread():
         )
         await rt.run_forever(interval_sec=300)
     asyncio.run(run())
+
+async def cmd_bigtech(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/bigtech — 빅테크 저점/버블 즉시 점검"""
+    await update.message.reply_text("📡 빅테크 모니터 실행 중... (20~30초)")
+    try:
+        from modules.bigtech_monitor import analyze_bigtech
+        summary = await analyze_bigtech(send)
+        if summary:
+            await send(summary)
+        else:
+            await update.message.reply_text("ℹ️ 빅테크 특이 신호 없음")
+    except ImportError:
+        await update.message.reply_text(
+            "⚠️ bigtech_monitor 모듈이 없습니다.\n"
+            "/media/dps/T7/stock_ai/modules/bigtech_monitor.py 를 먼저 생성해주세요."
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ 실패: {e}")
+        print(f"  ❌ cmd_bigtech 실패: {e}")
+
 
 # ── 메인 ──
 def main():
@@ -2638,6 +2857,7 @@ def main():
     app.add_handler(CommandHandler("analyze",     cmd_analyze))
     app.add_handler(CommandHandler("recommend",   cmd_recommend))
     app.add_handler(CommandHandler("longterm",    cmd_longterm))
+    app.add_handler(CommandHandler("bigtech",     cmd_bigtech))
 
     async def error_handler(update, context):
         print(f"⚠️ 텔레그램 에러: {context.error}")
