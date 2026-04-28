@@ -6,16 +6,16 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 from modules.sector_db import SECTOR_DB, get_sector_list, get_all_tickers, get_subsector_tickers, get_sector_by_ticker
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class SectorRotation:
     def __init__(self):
         self.kis           = KISApi()
-        self.rotation_file = "/home/dps/stock_ai/data/sector_rotation.json"
+        self.rotation_file = "/media/dps/T7/stock_ai/data/sector_rotation.json"
 
     def _is_market_open(self, market="KR"):
         """장 운영 시간 여부"""
@@ -196,7 +196,7 @@ JSON으로만 답변:
             }
 
         # 저장
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         save_key = f"rotation_{market}"
         existing = {}
         if os.path.exists(self.rotation_file):

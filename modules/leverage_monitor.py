@@ -6,10 +6,10 @@ import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class LeverageMonitor:
     """
@@ -18,7 +18,7 @@ class LeverageMonitor:
     """
     def __init__(self):
         self.kis          = KISApi()
-        self.alert_file   = "/home/dps/stock_ai/data/leverage_alerts.json"
+        self.alert_file   = "/media/dps/T7/stock_ai/data/leverage_alerts.json"
         self.alert_history = self._load_alerts()
 
         # 한국 레버리지/섹터 ETF
@@ -292,7 +292,7 @@ class LeverageMonitor:
         from anthropic import Anthropic
         from dotenv import load_dotenv
         import os, re, json as _json
-        load_dotenv('/home/dps/stock_ai/.env')
+        load_dotenv('/media/dps/T7/stock_ai/.env')
         client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
         kr   = self.get_kr_leverage_status()

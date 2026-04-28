@@ -5,10 +5,10 @@ import time
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
-CALENDAR_FILE = "/home/dps/stock_ai/data/event_calendar.json"
+CALENDAR_FILE = "/media/dps/T7/stock_ai/data/event_calendar.json"
 
 
 class EventCalendar:

@@ -6,13 +6,13 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.watchlist_monitor import WatchlistMonitor
 from modules.technical_analyzer import TechnicalAnalyzer
 from modules.price_collector import PriceCollector
 from modules.market_indicators import MarketIndicators
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 monitor  = WatchlistMonitor()
 analyzer = TechnicalAnalyzer()
@@ -148,7 +148,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🍓 라즈베리파이5: 정상 가동 중
 📋 감시 종목: 총 {total}개
 🕐 현재 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-💾 데이터 경로: /home/dps/stock_ai/data/
+💾 데이터 경로: /media/dps/T7/stock_ai/data/
 
 ✅ 모든 시스템 정상"""
     await update.message.reply_text(msg, parse_mode='HTML')

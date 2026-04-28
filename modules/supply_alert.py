@@ -5,10 +5,10 @@ from datetime import datetime
 from telegram import Bot
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.supply_demand import SupplyDemand
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 def get_dynamic_supply_watch():
     """당일 외국인/기관 순매수 TOP 종목 동적 조회"""
@@ -85,7 +85,7 @@ def get_dynamic_supply_watch():
 
     # 포트폴리오 종목도 포함
     try:
-        portfolio_file = "/home/dps/stock_ai/data/portfolio.json"
+        portfolio_file = "/media/dps/T7/stock_ai/data/portfolio.json"
         if os.path.exists(portfolio_file):
             with open(portfolio_file, 'r') as f:
                 portfolio = json.load(f)

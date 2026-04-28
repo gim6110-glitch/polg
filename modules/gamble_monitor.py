@@ -6,10 +6,10 @@ import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
-GAMBLE_FILE = "/home/dps/stock_ai/data/gamble_watchlist.json"
+GAMBLE_FILE = "/media/dps/T7/stock_ai/data/gamble_watchlist.json"
 
 
 class GambleMonitor:

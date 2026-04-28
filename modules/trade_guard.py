@@ -5,11 +5,11 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
-GUARD_FILE    = "/home/dps/stock_ai/data/trade_guard.json"
-SNAPSHOT_FILE = "/home/dps/stock_ai/data/asset_snapshots.json"
+GUARD_FILE    = "/media/dps/T7/stock_ai/data/trade_guard.json"
+SNAPSHOT_FILE = "/media/dps/T7/stock_ai/data/asset_snapshots.json"
 
 
 class TradeGuard:

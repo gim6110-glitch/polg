@@ -5,18 +5,18 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 from modules.ai_analyzer import AIAnalyzer
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class Portfolio:
     def __init__(self):
         self.kis            = KISApi()
         self.ai             = AIAnalyzer()
-        self.portfolio_file = "/home/dps/stock_ai/data/portfolio.json"
-        self.alert_file     = "/home/dps/stock_ai/data/portfolio_alerts.json"
+        self.portfolio_file = "/media/dps/T7/stock_ai/data/portfolio.json"
+        self.alert_file     = "/media/dps/T7/stock_ai/data/portfolio_alerts.json"
         self.portfolio      = self._load_portfolio()
         self.alert_history  = self._load_alerts()
 
@@ -30,7 +30,7 @@ class Portfolio:
         return {"_cash": 0, "_cash_usd": 0.0}
 
     def _save_portfolio(self):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.portfolio_file, "w", encoding="utf-8") as f:
             json.dump(self.portfolio, f, ensure_ascii=False, indent=2)
 

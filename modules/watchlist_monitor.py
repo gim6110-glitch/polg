@@ -6,23 +6,23 @@ from datetime import datetime
 from telegram import Bot
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.technical_analyzer import TechnicalAnalyzer
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class WatchlistMonitor:
     def __init__(self):
         self.bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.analyzer = TechnicalAnalyzer()
-        self.watchlist_file = "/home/dps/stock_ai/data/watchlist.json"
-        self.alert_history_file = "/home/dps/stock_ai/data/alert_history.json"
+        self.watchlist_file = "/media/dps/T7/stock_ai/data/watchlist.json"
+        self.alert_history_file = "/media/dps/T7/stock_ai/data/alert_history.json"
         self.watchlist = self._load_watchlist()
         self.alert_history = self._load_alert_history()
 
     def _load_watchlist(self):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         if os.path.exists(self.watchlist_file):
             with open(self.watchlist_file, "r", encoding="utf-8") as f:
                 return json.load(f)

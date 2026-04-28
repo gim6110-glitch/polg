@@ -4,7 +4,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from datetime import datetime
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 # 텔레그램 메시지 제한 고려한 최대 글자수
 MAX_RESPONSE_CHARS = 1500

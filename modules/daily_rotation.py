@@ -5,11 +5,11 @@ from datetime import datetime
 from telegram import Bot
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.news_collector import NewsCollector
 from modules.sector_rotation import SectorRotation
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 async def run_daily_rotation(send_func=None):
     """매일 06:00 한국 + 미국 순환매 분석"""

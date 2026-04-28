@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 async def safe_send(bot, chat_id, text, parse_mode='HTML', max_length=4000):
     """

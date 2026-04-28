@@ -6,8 +6,8 @@ import yfinance as yf
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class MacroAnalyzer:
     """
@@ -16,7 +16,7 @@ class MacroAnalyzer:
     → 전략 자동 조정
     """
     def __init__(self):
-        self.macro_file = "/home/dps/stock_ai/data/macro_context.json"
+        self.macro_file = "/media/dps/T7/stock_ai/data/macro_context.json"
         self.context    = self._load_context()
 
     def _load_context(self):
@@ -26,7 +26,7 @@ class MacroAnalyzer:
         return {}
 
     def _save_context(self, context):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.macro_file, "w", encoding="utf-8") as f:
             json.dump(context, f, ensure_ascii=False, indent=2)
 

@@ -6,7 +6,7 @@ import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class KISApi:
     def __init__(self):
@@ -25,7 +25,7 @@ class KISApi:
 
         self.token      = None
         self.token_exp  = None
-        self.token_file = "/home/dps/stock_ai/data/kis_token.json"
+        self.token_file = "/media/dps/T7/stock_ai/data/kis_token.json"
 
     def _get_token(self):
         if os.path.exists(self.token_file):
@@ -49,7 +49,7 @@ class KISApi:
             if 'access_token' in data:
                 self.token     = data['access_token']
                 self.token_exp = datetime.now() + timedelta(hours=12)
-                os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+                os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
                 with open(self.token_file, 'w') as f:
                     json.dump({
                         'token':   self.token,

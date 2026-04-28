@@ -3,7 +3,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 
 class BullishSignals:
     """

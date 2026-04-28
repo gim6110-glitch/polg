@@ -7,13 +7,13 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Bot
-sys.path.insert(0, "/home/dps/stock_ai")
+sys.path.insert(0, "/media/dps/T7/stock_ai")
 from modules.safe_sender import safe_send
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 try:
     import anthropic
@@ -30,7 +30,7 @@ class SupplyDemand:
     """
     def __init__(self):
         self.kis          = KISApi()
-        self.history_file = "/home/dps/stock_ai/data/supply_history.json"
+        self.history_file = "/media/dps/T7/stock_ai/data/supply_history.json"
 
         self.telegram_token   = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")

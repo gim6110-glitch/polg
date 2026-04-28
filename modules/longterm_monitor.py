@@ -6,10 +6,10 @@ import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class LongtermMonitor:
     """
@@ -19,7 +19,7 @@ class LongtermMonitor:
     """
     def __init__(self):
         self.kis        = KISApi()
-        self.alert_file = "/home/dps/stock_ai/data/longterm_alerts.json"
+        self.alert_file = "/media/dps/T7/stock_ai/data/longterm_alerts.json"
         self.alerts     = self._load_alerts()
 
         # ── 중장기 테마 ──
@@ -402,7 +402,7 @@ JSON으로만 답변:
         try:
             res  = client.messages.create(
                 model      = "claude-sonnet-4-6",
-                max_tokens = 800,
+                max_tokens = 1500,
                 messages   = [{"role": "user", "content": prompt}]
             )
             import re
@@ -413,9 +413,12 @@ JSON으로만 답변:
                 try:
                     data = json.loads(m.group())
                 except json.JSONDecodeError:
-                    clean = re.sub(r',\s*}', '}', m.group())
-                    clean = re.sub(r',\s*]', ']', clean)
-                    data  = json.loads(clean)
+                    try:
+                        clean = re.sub(r',\s*}', '}', m.group())
+                        clean = re.sub(r',\s*]', ']', clean)
+                        data  = json.loads(clean)
+                    except:
+                        return candidates  # 파싱 실패 시 AI 검증 없이 반환
                 verified = {v['ticker']: v for v in data.get('verified', []) if v.get('buy_now')}
                 result   = []
                 for c in candidates:
@@ -425,6 +428,7 @@ JSON으로만 답변:
                 return result
         except Exception as e:
             print(f"  ❌ AI 검증 실패: {e}")
+        # AI 검증 없이 바로 반환
         return candidates
 
     def build_alert_message(self, signals):
@@ -444,19 +448,58 @@ JSON으로만 답변:
                 market   = s.get('market', 'KR')
                 currency = "$" if market == "US" else "₩"
                 price    = s.get('price', 0)
-                target   = s.get('target', round(price * 1.20, 0))
-                stop     = s.get('stop_loss', round(price * 0.88, 0))
-                profit   = ((target - price) / price) * 100
-                sigs     = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
+
+                # 목표가/손절가 — KIS 실시간 가격 기준으로 계산
+                target = s.get('target', 0)
+                stop   = s.get('stop_loss', 0)
+                if not target or target <= 0:
+                    target = round(price * 1.20, 0) if market == "KR" else round(price * 1.20, 2)
+                if not stop or stop <= 0:
+                    stop = round(price * 0.88, 0) if market == "KR" else round(price * 0.88, 2)
+
+                # 목표가가 현재가보다 낮으면 수정
+                if target < price:
+                    target = round(price * 1.20, 0) if market == "KR" else round(price * 1.20, 2)
+                if stop > price:
+                    stop = round(price * 0.88, 0) if market == "KR" else round(price * 0.88, 2)
+
+                profit = ((target - price) / price) * 100 if price > 0 else 0
+                sigs   = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
+
+                # 매수가 계산
+                rsi      = s.get('rsi', 50)
+                drawdown = s.get('drawdown', 0)
+
+                # 매수 타이밍 판단
+                if rsi <= 40 or drawdown <= -10:
+                    buy_timing  = "지금 바로 진입 가능"
+                    buy1 = round(price * 0.99, 0) if market == "KR" else round(price * 0.99, 2)
+                    buy2 = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
+                    timing_emoji = "🟢"
+                elif rsi <= 55:
+                    buy_timing  = "조정 시 진입 (1~3% 빠지면 매수)"
+                    buy1 = round(price * 0.98, 0) if market == "KR" else round(price * 0.98, 2)
+                    buy2 = round(price * 0.95, 0) if market == "KR" else round(price * 0.95, 2)
+                    timing_emoji = "🟡"
+                else:
+                    buy_timing  = "기다렸다가 눌림목 진입 (3~5% 조정 후)"
+                    buy1 = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
+                    buy2 = round(price * 0.94, 0) if market == "KR" else round(price * 0.94, 2)
+                    timing_emoji = "🔴"
+
+                fmt = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
 
                 msg += f"""🎯 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]
 
 {sigs}
 
 💡 {s.get('reason', '')}
-💰 현재가: {currency}{price:,.2f}
-🎯 목표가: {currency}{target:,.2f} (+{profit:.0f}%, {s.get('timeframe', '3개월')})
-🛑 손절가: {currency}{stop:,.2f}
+{timing_emoji} 진입: {buy_timing}
+💰 현재가:  {currency}{fmt(price)}
+🟢 1차매수: {currency}{fmt(buy1)} (NXT/장전)
+🟡 2차매수: {currency}{fmt(buy2)} (추가 눌림)
+🎯 목표가:  {currency}{fmt(target)} (+{profit:.0f}%, {s.get('timeframe', '3~6개월')})
+🛑 손절가:  {currency}{fmt(stop)}
 
 """
 
@@ -467,18 +510,28 @@ JSON으로만 답변:
                 market   = s.get('market', 'US')
                 currency = "$" if market == "US" else "₩"
                 price    = s.get('price', 0)
-                target   = s.get('target', round(price * 3.0, 0))
-                stop     = s.get('stop_loss', round(price * 0.80, 0))
-                sigs     = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
+                target   = s.get('target', 0)
+                stop     = s.get('stop_loss', 0)
+
+                if not target or target <= price:
+                    target = round(price * 3.0, 2)
+                if not stop or stop >= price:
+                    stop = round(price * 0.80, 2)
+
+                sigs = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
+                buy1 = round(price * 0.99, 2)
+                fmt  = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
 
                 msg += f"""🎲 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]
 
 {sigs}
 
 💡 {s.get('reason', s.get('memo', ''))}
-💰 현재가: {currency}{price:,.2f}
-🎯 목표: {currency}{target:,.2f} (장기 3~5배)
-🛑 손절: {currency}{stop:,.2f}
+🟢 진입: 조건 충족 즉시 (5일선 돌파 확인)
+💰 현재가:  {currency}{fmt(price)}
+🟢 매수가:  {currency}{fmt(buy1)}
+🎯 목표:   {currency}{fmt(target)} (3~5배)
+🛑 손절:   {currency}{fmt(stop)} (-20%)
 ⚠️ 총자산 2% 이하 소액만!
 
 """

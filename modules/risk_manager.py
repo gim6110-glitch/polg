@@ -5,8 +5,8 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, "/home/dps/stock_ai")
-load_dotenv("/home/dps/stock_ai/.env")
+sys.path.insert(0, "/media/dps/T7/stock_ai")
+load_dotenv("/media/dps/T7/stock_ai/.env")
 
 class RiskManager:
     """
@@ -16,7 +16,7 @@ class RiskManager:
     손절/익절 고도화
     """
     def __init__(self):
-        self.portfolio_file = "/home/dps/stock_ai/data/portfolio.json"
+        self.portfolio_file = "/media/dps/T7/stock_ai/data/portfolio.json"
         self.portfolio      = self._load_portfolio()
 
     def _load_portfolio(self):

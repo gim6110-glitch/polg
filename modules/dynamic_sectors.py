@@ -5,10 +5,10 @@ import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.sector_db import SECTOR_DB
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class DynamicSectors:
     """
@@ -17,7 +17,7 @@ class DynamicSectors:
     완전 정착하면 고정 섹터 DB에 추가
     """
     def __init__(self):
-        self.dynamic_file = "/home/dps/stock_ai/data/dynamic_sectors.json"
+        self.dynamic_file = "/media/dps/T7/stock_ai/data/dynamic_sectors.json"
         self.dynamic      = self._load()
 
     def _load(self):
@@ -27,7 +27,7 @@ class DynamicSectors:
         return {"themes": {}}
 
     def _save(self):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.dynamic_file, "w", encoding="utf-8") as f:
             json.dump(self.dynamic, f, ensure_ascii=False, indent=2)
 
@@ -163,7 +163,7 @@ JSON으로만 답변:
     }},'''
 
         try:
-            with open('/home/dps/stock_ai/modules/sector_db.py', 'r') as f:
+            with open('/media/dps/T7/stock_ai/modules/sector_db.py', 'r') as f:
                 content = f.read()
 
             # SECTOR_DB 마지막 항목 앞에 추가
@@ -173,7 +173,7 @@ JSON으로만 답변:
 
             new_content = content[:insert_point] + new_sector + content[insert_point:]
 
-            with open('/home/dps/stock_ai/modules/sector_db.py', 'w') as f:
+            with open('/media/dps/T7/stock_ai/modules/sector_db.py', 'w') as f:
                 f.write(new_content)
 
             # 임시 목록에서 제거
@@ -189,7 +189,7 @@ JSON으로만 답변:
         watchlist = {}
 
         # 고정 섹터 (오늘 순환매 파일에서)
-        rotation_file = "/home/dps/stock_ai/data/sector_rotation.json"
+        rotation_file = "/media/dps/T7/stock_ai/data/sector_rotation.json"
         if os.path.exists(rotation_file):
             with open(rotation_file, "r") as f:
                 rot = json.load(f)

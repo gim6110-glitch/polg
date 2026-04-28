@@ -6,16 +6,16 @@ import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 from modules.sector_db import SECTOR_DB
 
-load_dotenv('/home/dps/stock_ai/.env')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class HighLowScanner:
     def __init__(self):
         self.kis        = KISApi()
-        self.alert_file = "/home/dps/stock_ai/data/highlow_alerts.json"
+        self.alert_file = "/media/dps/T7/stock_ai/data/highlow_alerts.json"
         self.alerts     = self._load_alerts()
 
     def _load_alerts(self):

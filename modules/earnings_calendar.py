@@ -6,8 +6,8 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class EarningsCalendar:
     """
@@ -15,9 +15,9 @@ class EarningsCalendar:
     보유 종목 실적 발표 전날 알림
     """
     def __init__(self):
-        self.alert_file   = "/home/dps/stock_ai/data/earnings_alerts.json"
+        self.alert_file   = "/media/dps/T7/stock_ai/data/earnings_alerts.json"
         self.alerts       = self._load_alerts()
-        self.portfolio_file = "/home/dps/stock_ai/data/portfolio.json"
+        self.portfolio_file = "/media/dps/T7/stock_ai/data/portfolio.json"
 
         # 기본 주요 종목
         self.base_watchlist = {
@@ -72,14 +72,14 @@ class EarningsCalendar:
         """한국 종목 실적 발표 (DART API)"""
         import requests, os
         from dotenv import load_dotenv
-        load_dotenv('/home/dps/stock_ai/.env')
+        load_dotenv('/media/dps/T7/stock_ai/.env')
 
         api_key  = os.getenv("DART_API_KEY")
         upcoming = []
         today    = datetime.now().date()
 
         # 포트폴리오에서 한국 주식 가져오기
-        portfolio_file = "/home/dps/stock_ai/data/portfolio.json"
+        portfolio_file = "/media/dps/T7/stock_ai/data/portfolio.json"
         kr_stocks = {}
         try:
             if os.path.exists(portfolio_file):

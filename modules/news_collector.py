@@ -53,7 +53,7 @@ class NewsCollector:
         from dotenv import load_dotenv
         import os, json, re as _re
 
-        load_dotenv('/home/dps/stock_ai/.env')
+        load_dotenv('/media/dps/T7/stock_ai/.env')
         client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
         titles_text = ""

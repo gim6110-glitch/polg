@@ -7,7 +7,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 
 
 class MarketRegime:
@@ -22,9 +22,9 @@ class MarketRegime:
     """
 
     def __init__(self):
-        self.regime_file         = "/home/dps/stock_ai/data/market_regime.json"
-        self.regime_history_file = "/home/dps/stock_ai/data/regime_history.json"
-        self.strategy_file       = "/home/dps/stock_ai/data/dynamic_strategy.json"
+        self.regime_file         = "/media/dps/T7/stock_ai/data/market_regime.json"
+        self.regime_history_file = "/media/dps/T7/stock_ai/data/regime_history.json"
+        self.strategy_file       = "/media/dps/T7/stock_ai/data/dynamic_strategy.json"
         self.current_regime      = self._load_regime()
 
     # ── 파일 I/O ──────────────────────────────────
@@ -45,7 +45,7 @@ class MarketRegime:
         }
 
     def _save_regime(self):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.regime_file, "w") as f:
             json.dump(self.current_regime, f, ensure_ascii=False, indent=2)
 
@@ -69,7 +69,7 @@ class MarketRegime:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
     def _save_strategy(self, strategy):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.strategy_file, "w") as f:
             json.dump(strategy, f, ensure_ascii=False, indent=2)
 

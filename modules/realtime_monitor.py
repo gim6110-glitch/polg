@@ -5,10 +5,10 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 
-sys.path.insert(0, '/home/dps/stock_ai')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
 
-ALERT_FILE = "/home/dps/stock_ai/data/realtime_alerts.json"
+ALERT_FILE = "/media/dps/T7/stock_ai/data/realtime_alerts.json"
 
 
 class RealtimeMonitor:
@@ -478,7 +478,7 @@ class RealtimeMonitor:
 
     def _load_portfolio(self):
         try:
-            with open("/home/dps/stock_ai/data/portfolio.json", "r") as f:
+            with open("/media/dps/T7/stock_ai/data/portfolio.json", "r") as f:
                 return json.load(f)
         except:
             return {}

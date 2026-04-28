@@ -5,10 +5,10 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
-BACKTEST_FILE = "/home/dps/stock_ai/data/backtest.json"
+BACKTEST_FILE = "/media/dps/T7/stock_ai/data/backtest.json"
 
 FEE = {
     "KR": 0.004,

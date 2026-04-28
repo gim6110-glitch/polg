@@ -7,8 +7,8 @@ import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class DartMonitor:
     """
@@ -18,7 +18,7 @@ class DartMonitor:
     """
     def __init__(self):
         self.api_key    = os.getenv("DART_API_KEY")
-        self.alert_file = "/home/dps/stock_ai/data/dart_alerts.json"
+        self.alert_file = "/media/dps/T7/stock_ai/data/dart_alerts.json"
         self.alerts     = self._load_alerts()
         self.base_url   = "https://opendart.fss.or.kr/api"
 
@@ -45,7 +45,7 @@ class DartMonitor:
         return {}
 
     def _save_alerts(self):
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         with open(self.alert_file, "w") as f:
             json.dump(self.alerts, f, ensure_ascii=False, indent=2)
 

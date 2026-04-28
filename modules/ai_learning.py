@@ -5,8 +5,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/home/dps/stock_ai')
-load_dotenv('/home/dps/stock_ai/.env')
+sys.path.insert(0, '/media/dps/T7/stock_ai')
+load_dotenv('/media/dps/T7/stock_ai/.env')
 
 class AILearning:
     """
@@ -14,12 +14,12 @@ class AILearning:
     시간이 쌓일수록 AI 판단 정확도 향상
     """
     def __init__(self):
-        self.db_file = "/home/dps/stock_ai/data/ai_learning.db"
+        self.db_file = "/media/dps/T7/stock_ai/data/ai_learning.db"
         self._init_db()
 
     def _init_db(self):
         """DB 초기화"""
-        os.makedirs("/home/dps/stock_ai/data", exist_ok=True)
+        os.makedirs("/media/dps/T7/stock_ai/data", exist_ok=True)
         conn = sqlite3.connect(self.db_file)
         c    = conn.cursor()
 
