@@ -80,6 +80,80 @@ class DartMonitor:
             pass
         return None
 
+
+    # 주요 업종코드 매핑 (한국표준산업분류 중분류)
+    INDUTY_MAP = {
+        '26': '전자부품/컴퓨터/통신장비',
+        '261': '반도체',
+        '262': '전자부품',
+        '263': '통신/방송장비',
+        '264': '영상/음향장비',
+        '265': '측정/광학기기',
+        '266': '전자부품 기타',
+        '264': '디스플레이',
+        '27': '의료/정밀기기',
+        '28': '전기장비',
+        '29': '기계장비',
+        '30': '자동차/트레일러',
+        '31': '기타운송장비',
+        '20': '화학물질/제품',
+        '21': '의약품',
+        '22': '고무/플라스틱',
+        '24': '금속',
+        '25': '금속가공',
+        '35': '전기/가스/증기',
+        '36': '수도/폐기물',
+        '41': '건설업',
+        '46': '도매업',
+        '47': '소매업',
+        '58': 'SW개발/공급',
+        '59': '영상/방송',
+        '60': '방송업',
+        '61': '통신업',
+        '62': 'IT서비스',
+        '63': '정보서비스',
+        '64': '금융',
+        '65': '보험',
+        '66': '금융서비스',
+        '70': '부동산',
+        '72': '연구개발',
+        '73': '전문서비스',
+        '86': '의료/보건',
+        '90': '창작/예술',
+        '26429': '전자부품/통신장비',
+        '26421': '반도체',
+        '26110': '반도체',
+        '26120': '디스플레이',
+        '21202': '바이오/의약품',
+        '30010': '자동차',
+        '62010': 'IT서비스/SW',
+    }
+
+    def get_sector(self, stock_code):
+        """종목코드 → 업종명 (DART 기업개황 API)"""
+        try:
+            corp_code = self.get_corp_code(stock_code)
+            if not corp_code:
+                return None
+            url    = f'{self.base_url}/company.json'
+            params = {'crtfc_key': self.api_key, 'corp_code': corp_code}
+            res    = requests.get(url, params=params, timeout=10)
+            data   = res.json()
+            if data.get('status') == '000':
+                code = data.get('induty_code', '')
+                # 정확히 일치하는 코드 먼저
+                if code in self.INDUTY_MAP:
+                    return self.INDUTY_MAP[code]
+                # 앞 2~3자리로 매핑
+                for length in [3, 2]:
+                    prefix = code[:length]
+                    if prefix in self.INDUTY_MAP:
+                        return self.INDUTY_MAP[prefix]
+                return f'업종코드 {code}'
+        except Exception as e:
+            print(f'❌ DART 업종 조회 실패: {e}')
+        return None
+
     def get_recent_disclosures(self, corp_code, days=3):
         """최근 공시 조회"""
         try:

@@ -1,0 +1,11 @@
+{
+  "kr_score_threshold": 4,
+  "kr_lt_threshold": 5,
+  "us_score_threshold": 4,
+  "position_size": 80,
+  "cycle_stage": "과열경계",
+  "correction_prob": 40,
+  "watch_sectors": [],
+  "avoid_sectors": [],
+  "updated": "2026-04-28T13:59:05.384482"
+}

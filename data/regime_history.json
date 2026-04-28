@@ -1887,5 +1887,15 @@
     "sp_current": 7165.08,
     "sp_change": 0.8,
     "updated": "2026-04-26T14:34:14.213582"
+  },
+  {
+    "date": "2026-04-28",
+    "cycle_stage": "과열경계",
+    "kr_regime": "강세",
+    "us_regime": "강세",
+    "correction_prob": 40,
+    "ai_strategy": "AI 판단 불가 — 규칙 기반",
+    "kospi": 6681.95,
+    "nasdaq": 24887.1
   }
 ]

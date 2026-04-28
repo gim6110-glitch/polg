@@ -1,46 +1,122 @@
 {
   "regime": "강세",
-  "score": 10,
-  "consecutive_days": 266,
+  "score": 12,
+  "consecutive_days": 267,
   "prev_regime": "강세",
   "regime_changed": false,
-  "strategy": "강세_전략",
+  "cycle_stage": "과열경계",
+  "correction_prob": 40,
+  "confidence": 100,
   "kr_regime": "강세",
-  "kr_score": 10,
+  "kr_score": 11,
   "kr_details": [
-    "✅ 코스피 단기 정배열",
-    "✅ 코스피 장기 정배열",
-    "✅ 코스피 20일선 위",
-    "✅ 최근 5일 +4.1% 상승",
-    "✅ 최근 20일 +22.7% 상승",
-    "✅ VIX 낮음 (18.7) → 안정",
-    "✅ 고점 대비 -0.0% (건강한 상승)"
+    "🏔 역사적 신고가 영역 (6,682)",
+    "✅ 단기 정배열",
+    "✅ 장기 정배열",
+    "✅ 5일 +4.1%",
+    "✅ 20일 +22.0%",
+    "⚠️ 코스닥 약세 (-0.4%)"
   ],
-  "kospi_current": 6475.63,
-  "kospi_ma20": 5856.84,
-  "kospi_drawdown": -0.0,
-  "kr_week_change": 4.13,
-  "kr_month_change": 22.71,
-  "vix": 18.7,
+  "kr_signals": {
+    "ath": true,
+    "kosdaq_change": -0.43,
+    "kosdaq_current": 1220.92
+  },
+  "kospi_current": 6681.95,
+  "kospi_ma20": 6005.2,
+  "kospi_drawdown": 0.0,
+  "kr_r5": 4.11,
+  "kr_r20": 21.96,
+  "kr_r60": 27.98,
+  "kr_ath_proximity": 100.0,
+  "kr_vol_ratio": 0.91,
+  "kosdaq_current": 1220.92,
+  "kosdaq_change": -0.43,
   "us_regime": "강세",
-  "us_score": 9,
+  "us_score": 14,
   "us_details": [
+    "🏔 나스닥+S&P 동시 신고가",
     "✅ 나스닥 단기 정배열",
     "✅ 나스닥 장기 정배열",
-    "✅ 나스닥 20일선 위",
-    "✅ 최근 20일 +18.6% 상승",
-    "✅ S&P500 동반 상승 (+0.8%)",
-    "✅ VIX 낮음 (18.7)",
-    "✅ 고점 대비 0.0% (건강)",
-    "✅ 미국 금리 (4.31%)"
+    "✅ 나스닥 20일 +19.7%",
+    "✅ VIX 18.0 하락 (건강한 상승)",
+    "✅ VIX 18.0 안정",
+    "✅ 공포탐욕 33 공포",
+    "✅ 나스닥/S&P 동반 상승"
   ],
-  "nas_current": 24836.6,
-  "nas_ma20": 23071.76,
-  "nas_drawdown": 0.0,
-  "nas_day_change": 1.63,
-  "nas_week_change": 1.77,
-  "nas_month_change": 18.56,
-  "sp_current": 7165.08,
-  "sp_change": 0.8,
-  "updated": "2026-04-26T14:34:14.213582"
+  "us_signals": {
+    "ath": true
+  },
+  "nas_current": 24887.1,
+  "nas_ma20": 23268.7,
+  "nas_day_change": 0.2,
+  "nas_r5": 2.59,
+  "nas_r20": 19.68,
+  "nas_r60": 6.07,
+  "nas_ath_proximity": 100.0,
+  "sp_current": 7173.91,
+  "sp_change": 0.12,
+  "vix": 18.0,
+  "vix_signal": "건강",
+  "fg_score": 33,
+  "fg_class": "Fear",
+  "dxy_change": 0.02,
+  "oil_change": 1.08,
+  "gold_change": 0.13,
+  "sector_etfs": {
+    "반도체": {
+      "day": -0.04,
+      "week": 8.95,
+      "ticker": "SMH"
+    },
+    "빅테크": {
+      "day": 0.05,
+      "week": 3.09,
+      "ticker": "QQQ"
+    },
+    "AI": {
+      "day": 3.02,
+      "week": 4.76,
+      "ticker": "BOTZ"
+    },
+    "에너지": {
+      "day": -0.18,
+      "week": 1.61,
+      "ticker": "XLE"
+    },
+    "금융": {
+      "day": 0.76,
+      "week": -0.94,
+      "ticker": "XLF"
+    },
+    "유틸리티": {
+      "day": 0.02,
+      "week": 2.76,
+      "ticker": "XLU"
+    },
+    "헬스": {
+      "day": -0.5,
+      "week": -1.69,
+      "ticker": "XLV"
+    },
+    "소비재": {
+      "day": -0.72,
+      "week": -0.95,
+      "ticker": "XLY"
+    }
+  },
+  "ai_strategy": "AI 판단 불가 — 규칙 기반",
+  "ai_us_strategy": "AI 판단 불가",
+  "cycle_analysis": "",
+  "correction_timing": "미확인",
+  "key_risk": "데이터 부족",
+  "opportunity": "미확인",
+  "tomorrow_outlook": "미확인",
+  "watch_sectors": [],
+  "avoid_sectors": [],
+  "kr_score_threshold": 4,
+  "kr_lt_threshold": 5,
+  "us_score_threshold": 4,
+  "position_size": 80,
+  "updated": "2026-04-28T13:59:05.384482"
 }

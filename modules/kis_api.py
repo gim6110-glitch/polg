@@ -276,6 +276,32 @@ class KISApi:
         return None
 
 
+
+    def get_kr_stock_info(self, code):
+        """한국 주식 종목명 + 업종 조회 (TR: CTPF1604R)"""
+        try:
+            headers, base = self._headers('CTPF1604R')
+            url    = f'{base}/uapi/domestic-stock/v1/quotations/search-stock-info'
+            params = {
+                'PRDT_TYPE_CD': '300',
+                'PDNO': code,
+            }
+            res  = requests.get(url, headers=headers, params=params, timeout=10)
+            data = res.json()
+            if data.get('rt_cd') == '0':
+                output = data.get('output', {})
+                name   = output.get('prdt_abrv_name', '') or output.get('prdt_name', '')
+                sector = output.get('idx_bztp_scls_cd_name', '') or output.get('bstp_kor_isnm', '')
+                return {'name': name, 'sector': sector}
+        except Exception as e:
+            print(f'❌ 종목 정보 조회 실패: {e}')
+        return None
+
+    def get_kr_stock_name(self, code):
+        """하위 호환용 — get_kr_stock_info 래퍼"""
+        info = self.get_kr_stock_info(code)
+        return info['name'] if info else None
+
     def get_kr_ohlcv(self, code, days=60):
         """
         한국 주식 일봉 데이터 (KIS API)
@@ -299,7 +325,7 @@ class KISApi:
                 print(f"❌ {code} 일봉 실패: {data.get('msg1')}")
                 return None
             rows = []
-            for item in data.get('output2', []):
+            for item in data.get('output', []):
                 try:
                     rows.append({
                         "date":   item['stck_bsop_date'],

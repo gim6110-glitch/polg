@@ -445,6 +445,7 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # KR 6자리 숫자 티커 직접
             ticker = query
             market = "KR"
+            # sector_db에서 종목명/섹터 확인
             for sector_name, sector_data in SECTOR_DB.items():
                 if sector_data.get('market', 'KR') != 'KR':
                     continue
@@ -459,6 +460,20 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             break
                 if name != query:
                     break
+            # sector_db에 없으면 KIS + DART로 종목명/섹터 조회
+            if name == query:
+                kr_name = kis.get_kr_stock_name(ticker)
+                if kr_name:
+                    name = kr_name
+            if sector == '알 수 없음':
+                try:
+                    from modules.dart_monitor import DartMonitor
+                    dm = DartMonitor()
+                    dart_sector = dm.get_sector(ticker)
+                    if dart_sector:
+                        sector = dart_sector
+                except Exception:
+                    pass
 
         elif query.upper().isalpha() and len(query) <= 5:
             # US 티커 직접
@@ -632,13 +647,22 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur_regime = kr_regime if market == "KR" else us_regime
  
         # 오늘 AI 선정 섹터
-        mt_context    = mt.get_current_context()
+        mt_context    = ma.get_current_context()
         selected_sectors = []
         overheated_sectors = []
         if mt_context:
-            ai_result         = mt_context.get('ai_result', {})
-            selected_sectors  = [s['kr_sector'] for s in ai_result.get('selected_sectors', [])]
-            overheated_sectors = ai_result.get('overheated_sectors', [])
+            ai_result          = mt_context.get('ai_result', mt_context)
+            # selected_sectors: ai_result 안에 있거나 favorable_sectors로 대체
+            raw_sectors        = ai_result.get('selected_sectors', [])
+            if raw_sectors and isinstance(raw_sectors[0], dict):
+                selected_sectors = [s.get('kr_sector', s.get('sector', '')) for s in raw_sectors]
+            elif raw_sectors:
+                selected_sectors = raw_sectors
+            else:
+                # favorable_sectors로 대체
+                selected_sectors = mt_context.get('favorable_sectors', [])
+            overheated_sectors = ai_result.get('overheated_sectors',
+                                 mt_context.get('unfavorable_sectors', []))
  
         in_selected  = any(sector.lower() in s.lower() or s.lower() in sector.lower() for s in selected_sectors)
         is_overheated = any(sector.lower() in s.lower() or s.lower() in sector.lower() for s in overheated_sectors)
