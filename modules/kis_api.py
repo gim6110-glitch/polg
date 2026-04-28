@@ -275,6 +275,104 @@ class KISApi:
             print(f"❌ 나스닥 조회 실패: {e}")
         return None
 
+
+    def get_kr_ohlcv(self, code, days=60):
+        """
+        한국 주식 일봉 데이터 (KIS API)
+        TR: FHKST01010400 — 국내주식 기간별시세
+        반환: list of dict {date, open, high, low, close, volume}
+        """
+        try:
+            headers, base = self._headers("FHKST01010400")
+            url    = f"{base}/uapi/domestic-stock/v1/quotations/inquire-daily-price"
+            end_dt   = datetime.now().strftime("%Y%m%d")
+            start_dt = (datetime.now() - timedelta(days=days + 30)).strftime("%Y%m%d")
+            params = {
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD":         code,
+                "FID_PERIOD_DIV_CODE":    "D",   # D=일봉
+                "FID_ORG_ADJ_PRC":        "0",   # 수정주가
+            }
+            res  = requests.get(url, headers=headers, params=params, timeout=10)
+            data = res.json()
+            if data.get('rt_cd') != '0':
+                print(f"❌ {code} 일봉 실패: {data.get('msg1')}")
+                return None
+            rows = []
+            for item in data.get('output2', []):
+                try:
+                    rows.append({
+                        "date":   item['stck_bsop_date'],
+                        "open":   int(item['stck_oprc']),
+                        "high":   int(item['stck_hgpr']),
+                        "low":    int(item['stck_lwpr']),
+                        "close":  int(item['stck_clpr']),
+                        "volume": int(item['acml_vol']),
+                    })
+                except Exception:
+                    continue
+            # 오래된 순 정렬
+            rows.sort(key=lambda x: x['date'])
+            return rows[-days:] if len(rows) >= days else rows
+        except Exception as e:
+            print(f"❌ {code} 일봉 조회 실패: {e}")
+            return None
+
+    def calc_indicators_kr(self, code, days=60):
+        """
+        KIS 일봉 기반 기술적 지표 계산
+        반환: dict {rsi, ma5, ma20, ma60, vol_ratio, obv_trend, drawdown, high_52w, low_52w}
+        """
+        rows = self.get_kr_ohlcv(code, days=max(days, 80))
+        if not rows or len(rows) < 20:
+            return {}
+        try:
+            import pandas as pd
+            df         = pd.DataFrame(rows)
+            close      = df['close'].astype(float)
+            volume     = df['volume'].astype(float)
+            current    = close.iloc[-1]
+
+            ma5  = round(close.rolling(5).mean().iloc[-1], 0)
+            ma20 = round(close.rolling(20).mean().iloc[-1], 0)
+            ma60 = round(close.rolling(60).mean().iloc[-1], 0) if len(close) >= 60 else ma20
+
+            # RSI
+            delta = close.diff()
+            gain  = delta.clip(lower=0).rolling(14).mean()
+            loss  = (-delta.clip(upper=0)).rolling(14).mean()
+            rs    = gain / (loss.replace(0, 0.0001))
+            rsi   = round((100 - 100 / (1 + rs)).iloc[-1], 1)
+
+            # 거래량 비율
+            avg_vol   = volume.mean()
+            curr_vol  = volume.iloc[-1]
+            vol_ratio = round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1
+
+            # OBV
+            obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
+            obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
+
+            # 52주 고저
+            high_52w = close.max()
+            low_52w  = close.min()
+            drawdown = round((current - high_52w) / high_52w * 100, 1)
+
+            return {
+                "rsi":       rsi,
+                "ma5":       ma5,
+                "ma20":      ma20,
+                "ma60":      ma60,
+                "vol_ratio": vol_ratio,
+                "obv_trend": obv_trend,
+                "drawdown":  drawdown,
+                "high_52w":  round(high_52w, 0),
+                "low_52w":   round(low_52w, 0),
+            }
+        except Exception as e:
+            print(f"❌ {code} 지표 계산 실패: {e}")
+            return {}
+
     def get_all_realtime(self):
         """전체 실시간 데이터"""
         result = {}
