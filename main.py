@@ -298,107 +298,329 @@ async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {name} 없음")
 
 async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /check 종목명또는티커 카카오방내용
+    예) /check 세나테크놀로지 카카오방에서 기관 매수 소식. 지금 들어가도 돼?
+    예) /check NVDA 어닝 서프라이즈 발표. 내일 갭상승 기대.
+
+    카카오방/SNS 정보 + 실제 데이터로 진입 여부 판단
+    결론: 즉시매수 / 대기매수(조건부) / 매수금지 3가지 중 하나
+    """
     if not context.args:
-        await update.message.reply_text("사용법: /check 티커")
+        await update.message.reply_text(
+            "사용법: /check 종목명 카카오방내용\n"
+            "예) /check 삼성전자 기관 3일 연속 매수. 지금 들어가도 돼?\n"
+            "예) /check NVDA 어닝 서프라이즈. 내일 갭상승 기대"
+        )
         return
-    ticker = context.args[0].upper()
-    r      = regime.current_regime
-    em     = regime.get_regime_emoji()
-    await update.message.reply_text(f"🔍 {ticker} 분석 중...")
-    from modules.kis_api import KISApi
-    kis = KISApi()
-    # 한국/미국 자동 판단
-    is_kr = ticker.isdigit() or (len(ticker) == 6 and ticker[:6].isdigit())
-    if is_kr:
-        kis_data = kis.get_kr_price(ticker)
-        if not kis_data:
-            await update.message.reply_text(f"❌ {ticker} 데이터 없음")
+
+    # 첫 번째 인자: 종목명/티커, 나머지: 카카오방 내용
+    query      = context.args[0]
+    kakao_info = " ".join(context.args[1:]) if len(context.args) > 1 else ""
+
+    await update.message.reply_text(f"🔍 {query} 검증 중... (20~30초)")
+
+    try:
+        from modules.kis_api import KISApi
+        from modules.sector_db import SECTOR_DB
+        from modules.supply_demand import SupplyDemand
+        from anthropic import Anthropic
+        import yfinance as yf
+        import re, json as _json
+
+        kis    = KISApi()
+        client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+        # ── 1. 종목 식별 (cmd_analyze와 동일 로직) ────
+        ticker = None
+        name   = query
+        market = None
+        sector = "알 수 없음"
+        q_upper = query.upper().strip()
+
+        if query.isdigit() and len(query) == 6:
+            ticker = query
+            market = "KR"
+            for sn, sd in SECTOR_DB.items():
+                if sd.get('market', 'KR') != 'KR':
+                    continue
+                for tier in ['대장주', '2등주', '소부장']:
+                    td = sd.get(tier, {})
+                    if not isinstance(td, dict):
+                        continue
+                    for sname, sticker in td.items():
+                        if sticker == ticker:
+                            name = sname; sector = sn; break
+                if name != query:
+                    break
+            if name == query:
+                kr_name = kis.get_kr_stock_name(ticker)
+                if kr_name:
+                    name = kr_name
+
+        elif q_upper.isalpha() and len(q_upper) <= 5:
+            ticker = q_upper
+            market = "US"
+            for sn, sd in SECTOR_DB.items():
+                if sd.get('market') != 'US':
+                    continue
+                for tier in ['대장주', '2등주']:
+                    for sname, sticker in sd.get(tier, {}).items():
+                        if sticker == ticker:
+                            name = sname; sector = sn; break
+                if name != query:
+                    break
+        else:
+            best_match = None
+            best_score = 999
+            for sn, sd in SECTOR_DB.items():
+                mkt = sd.get('market', 'KR')
+                for tier in ['대장주', '2등주', '소부장']:
+                    td = sd.get(tier, {})
+                    if not isinstance(td, dict):
+                        continue
+                    for sname, sticker in td.items():
+                        if sname == query:
+                            best_match = (sticker, sname, sn, mkt); best_score = 0; break
+                        if query in sname and len(sname) < best_score:
+                            best_match = (sticker, sname, sn, mkt); best_score = len(sname)
+                if best_score == 0:
+                    break
+            if best_match:
+                ticker, name, sector, market = best_match
+
+            if not ticker:
+                res = client.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=100,
+                    messages=[{"role": "user", "content":
+                        f"한국 주식 종목명을 티커로 변환. 종목명: {query}. "
+                        f'JSON으로만: {{"ticker": "000000", "name": "종목명", "market": "KR"}}'}]
+                )
+                text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
+                m    = re.search(r'\{.*\}', text, re.DOTALL)
+                if m:
+                    info   = _json.loads(m.group())
+                    market = info.get('market', 'KR')
+                    ticker = info.get('ticker', '').zfill(6) if market == 'KR' else info.get('ticker', '')
+                    name   = info.get('name', query)
+
+        if not ticker:
+            await update.message.reply_text(f"❌ {query} 종목을 찾을 수 없어요")
             return
-        # 기술적 지표는 yfinance로 보완
-        yf_ticker = ticker + ".KS"
-        data = analyzer.get_indicators(yf_ticker)
-        if data:
-            data['current_price'] = kis_data['price']
-            data['change_pct']    = kis_data['change_pct']
-            data['timestamp']     = kis_data['timestamp'] + " (KIS실시간)"
+
+        # ── 2. 실시간 데이터 수집 ─────────────────────
+        price_data = {}
+        tech_data  = {}
+
+        if market == "KR":
+            kd = kis.get_kr_price(ticker)
+            if kd:
+                price_data = kd
+            # KIS 일봉 지표
+            tech_data = kis.calc_indicators_kr(ticker, days=80) or {}
+
         else:
-            # yfinance 실패 시 KIS 데이터만으로 표시
-            data = {
-                'current_price':    kis_data['price'],
-                'change_pct':       kis_data['change_pct'],
-                'rsi':              'N/A',
-                'bb_position':      'N/A',
-                'stop_loss':        round(kis_data['price'] * 0.93, 0),
-                'stop_loss_pct':    -7.0,
-                'volume_ratio':     1.0,
-                'high_52w_proximity': 'N/A',
-                'signals':          [],
-                'timestamp':        kis_data['timestamp'] + " (KIS실시간)"
-            }
-    else:
-        # 미국 주식
-        us_data = None
-        for excd in ["NAS", "NYS", "AMS"]:
-            us_data = kis.get_us_price(ticker, excd)
-            if us_data and us_data.get('price', 0) > 0:
-                break
-        if not us_data or us_data.get('price', 0) == 0:
-            # 미국장 마감 중 → yfinance로 전날 종가 표시
-            import yfinance as yf
-            yf_data = yf.Ticker(ticker).history(period="2d").dropna()
-            if not yf_data.empty:
-                prev_price = round(yf_data['Close'].iloc[-1], 2)
-                prev_change = round(((yf_data['Close'].iloc[-1] - yf_data['Close'].iloc[-2]) / yf_data['Close'].iloc[-2]) * 100, 2)
-                us_data = {
-                    'price':      prev_price,
-                    'change_pct': prev_change,
-                    'timestamp':  '전날 종가 (미국장 마감 중)'
-                }
+            for excd in ["NAS", "NYS", "AMS"]:
+                ud = kis.get_us_price(ticker, excd)
+                if ud and ud.get('price', 0) > 0:
+                    price_data = ud; break
+            if not price_data:
+                try:
+                    h = yf.Ticker(ticker).history(period="2d").dropna()
+                    if not h.empty:
+                        price_data = {
+                            'price':      round(h['Close'].iloc[-1], 2),
+                            'change_pct': round((h['Close'].iloc[-1] - h['Close'].iloc[-2]) / h['Close'].iloc[-2] * 100, 2)
+                        }
+                except Exception:
+                    pass
+            # US 기술적 지표 (yfinance)
+            try:
+                hist = yf.Ticker(ticker).history(period="60d").dropna()
+                if len(hist) >= 20:
+                    close    = hist['Close']
+                    vol      = hist['Volume']
+                    ma5      = round(close.rolling(5).mean().iloc[-1], 2)
+                    ma20     = round(close.rolling(20).mean().iloc[-1], 2)
+                    ma60     = round(close.rolling(60).mean().iloc[-1], 2) if len(close) >= 60 else ma20
+                    delta    = close.diff()
+                    gain     = delta.clip(lower=0).rolling(14).mean()
+                    loss     = (-delta.clip(upper=0)).rolling(14).mean()
+                    rs       = gain / (loss.replace(0, 0.0001))
+                    rsi      = round((100 - 100 / (1 + rs)).iloc[-1], 1)
+                    avg_vol  = vol.mean()
+                    vol_ratio = round(vol.iloc[-1] / avg_vol, 1) if avg_vol > 0 else 1
+                    high_52w = close.max()
+                    drawdown = round((close.iloc[-1] - high_52w) / high_52w * 100, 1)
+                    obv      = (vol * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
+                    tech_data = {
+                        'rsi': rsi, 'ma5': ma5, 'ma20': ma20, 'ma60': ma60,
+                        'vol_ratio': vol_ratio, 'drawdown': drawdown,
+                        'obv_trend': "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락",
+                        'high_52w': round(high_52w, 2),
+                    }
+            except Exception:
+                pass
+
+        if not price_data:
+            await update.message.reply_text(f"❌ {name}({ticker}) 데이터 없음")
+            return
+
+        current_price = price_data.get('price', 0)
+        change_pct    = price_data.get('change_pct', 0)
+
+        # ── 3. 수급 (KR만) ────────────────────────────
+        supply_text = ""
+        if market == "KR":
+            try:
+                sd     = SupplyDemand()
+                supply = sd.analyze_supply(ticker, name)
+                if supply:
+                    supply_text = (
+                        f"외국인 {supply['foreign_consecutive']}일 연속 "
+                        f"{'순매수' if supply['foreign'] > 0 else '순매도'}\n"
+                        f"기관 {supply['organ_consecutive']}일 연속 "
+                        f"{'순매수' if supply['organ'] > 0 else '순매도'}"
+                    )
+            except Exception:
+                pass
+
+        # ── 4. 현재 장세 ──────────────────────────────
+        r          = regime.current_regime
+        cur_regime = r.get('kr_regime', r.get('regime', '중립')) if market == "KR" else r.get('us_regime', r.get('regime', '중립'))
+
+        # ── 5. AI 판단 ────────────────────────────────
+        rsi       = tech_data.get('rsi', 'N/A')
+        ma5       = tech_data.get('ma5', 0)
+        ma20      = tech_data.get('ma20', 0)
+        ma60      = tech_data.get('ma60', 0)
+        vol_ratio = tech_data.get('vol_ratio', 1)
+        drawdown  = tech_data.get('drawdown', 'N/A')
+        obv       = tech_data.get('obv_trend', 'N/A')
+
+        # 이평선 배열 판단
+        if ma5 and ma20 and ma60:
+            if ma5 > ma20 > ma60:
+                ma_signal = "정배열(5>20>60) — 추세 강함"
+            elif ma5 > ma20:
+                ma_signal = "단기 정배열"
+            elif ma5 < ma20 < ma60:
+                ma_signal = "역배열 — 추세 약함"
             else:
-                await update.message.reply_text(f"❌ {ticker} 데이터 없음")
-                return
-        data = analyzer.get_indicators(ticker)
-        if data:
-            data['current_price'] = us_data['price']
-            data['change_pct']    = us_data['change_pct']
-            data['timestamp']     = us_data['timestamp'] + " (KIS실시간)"
+                ma_signal = "혼조"
         else:
-            data = {
-                'current_price':    us_data['price'],
-                'change_pct':       us_data['change_pct'],
-                'rsi':              'N/A',
-                'bb_position':      'N/A',
-                'stop_loss':        round(us_data['price'] * 0.93, 2),
-                'stop_loss_pct':    -7.0,
-                'volume_ratio':     1.0,
-                'high_52w_proximity': 'N/A',
-                'signals':          [],
-                'timestamp':        us_data['timestamp'] + " (KIS실시간)"
-            }
-    
-    if not data:
-        await update.message.reply_text(f"❌ {ticker} 데이터 없음")
-        return
-    ai_result    = ai.analyze_buy_signal(ticker, ticker, data)
-    signals_text = "\n".join([f"  • {s}" for s in data['signals']]) if data['signals'] else "  없음"
-    msg = f"""📊 <b>{ticker} 분석</b>
-{em} {r.get('regime','?')}장
+            ma_signal = "N/A"
 
-💰 현재가: {data['current_price']:,}
-📊 RSI: {data['rsi']}
-📈 볼린저밴드: {data['bb_position']}
-📉 손절선: {data['stop_loss']:,} ({data['stop_loss_pct']}%)
-📦 거래량: {data['volume_ratio']}배
-🏔 52주 신고가: {data['high_52w_proximity']}%
+        currency = "₩" if market == "KR" else "$"
 
-🔔 신호:
-{signals_text}
+        prompt = f"""주식 매수 여부를 판단해주세요. 마크다운 금지.
 
-🤖 AI 판단:
-{ai_result if ai_result else "분석 불가"}
+=== 종목 정보 ===
+종목명: {name} ({ticker}) / {sector}
+현재가: {currency}{current_price:,} ({change_pct:+.1f}%)
 
-⏰ {data['timestamp']}"""
-    await send(msg)
+=== 기술적 지표 ===
+이평선 배열: {ma_signal}
+RSI: {rsi}
+거래량: {vol_ratio}배
+OBV: {obv}
+고점 대비: {drawdown}%
+
+=== 수급 ===
+{supply_text if supply_text else '수급 데이터 없음'}
+
+=== 현재 장세 ===
+{cur_regime}장
+
+=== 카카오방/SNS 정보 ===
+{kakao_info if kakao_info else '없음'}
+
+판단 기준:
+1. 카카오방 정보가 실제 데이터와 일치하는지 검증
+2. 지금 바로 진입 가능한지, 기다려야 하는지, 불가인지
+3. 카카오방 정보가 과장/루머일 가능성 평가
+
+반드시 3가지 중 하나로 결론:
+- 즉시매수: 지금 바로 진입 가능
+- 대기매수: 조건 충족 시 진입 (조건 명시)
+- 매수금지: 진입 불가 (이유 명시)
+
+JSON으로만:
+{{
+  "verdict": "즉시매수 or 대기매수 or 매수금지",
+  "reason": "판단 근거 2~3줄",
+  "kakao_reliability": "높음 or 보통 or 낮음(루머 가능성)",
+  "buy_price": 000000,
+  "wait_condition": "대기매수일 때 진입 조건 (즉시매수/매수금지면 없음)",
+  "target1": 000000,
+  "target2": 000000,
+  "stop_loss": 000000,
+  "timing": "NXT 08:00 or 정규장 초반 or 퇴근후 NXT or 오늘밤 or 없음"
+}}"""
+
+        print("  🧠 /check AI 판단 중...")
+        res  = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=800,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text   = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
+        m      = re.search(r'\{.*\}', text, re.DOTALL)
+        result = _json.loads(m.group()) if m else {}
+
+        # ── 6. 메시지 생성 ────────────────────────────
+        verdict = result.get('verdict', '판단불가')
+        verdict_emoji = {
+            "즉시매수": "🟢",
+            "대기매수": "🟡",
+            "매수금지": "🔴",
+        }.get(verdict, "⚪")
+
+        def fmt(val):
+            try:
+                if market == "KR":
+                    return f"₩{int(val):,}"
+                else:
+                    return f"${float(val):.2f}"
+            except:
+                return "?"
+
+        msg  = f"{verdict_emoji} <b>{verdict}</b> — {name}({ticker})\n\n"
+        msg += f"📊 현재가: {currency}{current_price:,} ({change_pct:+.1f}%)\n"
+        msg += f"📐 이평선: {ma_signal}\n"
+        msg += f"📊 RSI: {rsi} | 거래량: {vol_ratio}배\n"
+        if supply_text:
+            msg += f"💰 수급: {supply_text}\n"
+        msg += f"\n🤖 판단 근거\n{result.get('reason', '')}\n"
+
+        kakao_rel = result.get('kakao_reliability', '')
+        if kakao_info and kakao_rel:
+            msg += f"\n📱 카카오방 신뢰도: {kakao_rel}\n"
+
+        if verdict == "즉시매수":
+            msg += f"\n🟢 매수가: {fmt(result.get('buy_price', current_price))}\n"
+            msg += f"⏱ 타이밍: {result.get('timing', '')}\n"
+            msg += f"🎯 목표1: {fmt(result.get('target1', 0))}\n"
+            msg += f"🎯 목표2: {fmt(result.get('target2', 0))}\n"
+            msg += f"🛑 손절: {fmt(result.get('stop_loss', 0))}\n"
+        elif verdict == "대기매수":
+            msg += f"\n🟡 진입 조건: {result.get('wait_condition', '')}\n"
+            msg += f"🟢 조건 충족 시 매수가: {fmt(result.get('buy_price', current_price))}\n"
+            msg += f"⏱ 타이밍: {result.get('timing', '')}\n"
+            msg += f"🎯 목표1: {fmt(result.get('target1', 0))}\n"
+            msg += f"🎯 목표2: {fmt(result.get('target2', 0))}\n"
+            msg += f"🛑 손절: {fmt(result.get('stop_loss', 0))}\n"
+        else:
+            msg += f"\n🔴 매수금지 — 관망\n"
+
+        msg += f"\n⚠️ 최종 판단은 본인이 하세요\n"
+        msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        await send(msg)
+        print(f"  ✅ /check {name} 완료: {verdict}")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ 분석 실패: {e}")
+        print(f"  ❌ cmd_check 실패: {e}")
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
