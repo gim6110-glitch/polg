@@ -430,51 +430,20 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
  
         # ── 1. 종목 식별 ──────────────────────────────
-        #
-        # 판단 순서:
-        #   A) 6자리 숫자          → KR 티커 직접
-        #   B) 영문 대소문자 1~5자  → US 티커 직접
-        #   C) 한글/영문 종목명     → sector_db 검색 → KIS 검색 → AI 변환
-        #   D) KR 티커인데 sector_db에 없으면 KIS로 종목명 조회
-
-        ticker = None
-        name   = query
-        market = None
-        sector = "알 수 없음"
-
-        q_upper = query.upper().strip()
-
-        # A) KR 6자리 숫자 티커
-        if query.isdigit() and len(query) == 6:
-            ticker = query
-            market = "KR"
-            # sector_db에서 종목명/섹터 찾기
-            for sector_name, sector_data in SECTOR_DB.items():
-                if sector_data.get('market', 'KR') != 'KR':
-                    continue
-                for tier in ['대장주', '2등주', '소부장']:
-                    tier_data = sector_data.get(tier, {})
-                    if isinstance(tier_data, dict):
-                        for sname, sticker in tier_data.items():
-                            if sticker == ticker:
-                                name   = sname
-                                sector = sector_name
-                                break
-                if name != query:
-                    break
-            # sector_db에 없으면 KIS에서 종목명 조회
-            if name == query:
-                try:
-                    kd = kis.get_kr_price(ticker)
-                    if kd and kd.get('name'):
-                        name = kd['name']
-                except Exception:
-                    pass
-
-        # B) US 티커 (영문자만, 1~5자)
-        elif q_upper.isalpha() and len(q_upper) <= 5:
-            ticker = q_upper
+ 
+        # 미국 티커 판단 (영문자만)
+        is_us_ticker = query.isalpha() and query.isupper() and len(query) <= 5
+ 
+        ticker   = None
+        name     = query
+        market   = None
+        sector   = "알 수 없음"
+ 
+        if is_us_ticker:
+            # 미국 티커 직접 사용
+            ticker = query.upper()
             market = "US"
+            # sector_db에서 섹터 찾기
             for sector_name, sector_data in SECTOR_DB.items():
                 if sector_data.get('market') != 'US':
                     continue
@@ -484,156 +453,135 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             name   = sname
                             sector = sector_name
                             break
-                if name != query:
-                    break
-
         else:
-            # C) 종목명 → 티커 변환
-            # 1차: sector_db 정확도 순 검색
-            #   i)  완전일치
-            #   ii) query가 종목명에 포함 (짧은 것 우선)
-            best_match = None
-            best_score = 999
-
+            # 한국 종목명 → 티커 변환
+            # 1차: sector_db에서 검색
             for sector_name, sector_data in SECTOR_DB.items():
-                mkt = sector_data.get('market', 'KR')
+                if sector_data.get('market') != 'KR':
+                    continue
                 for tier in ['대장주', '2등주', '소부장']:
-                    tier_data = sector_data.get(tier, {})
-                    if not isinstance(tier_data, dict):
-                        continue
-                    for sname, sticker in tier_data.items():
-                        if sname == query:                        # 완전일치
-                            best_match = (sticker, sname, sector_name, mkt)
-                            best_score = 0
+                    for sname, sticker in sector_data.get(tier, {}).items():
+                        if query in sname or sname in query:
+                            ticker = sticker
+                            name   = sname
+                            market = "KR"
+                            sector = sector_name
                             break
-                        if query in sname and len(sname) < best_score:
-                            best_match = (sticker, sname, sector_name, mkt)
-                            best_score = len(sname)
-                    if best_score == 0:
-                        break
-                if best_score == 0:
+                if ticker:
                     break
-
-            if best_match:
-                ticker, name, sector, market = best_match
-
-            # 2차: KIS API 종목명 검색
-            if not ticker:
-                try:
-                    kr_result = kis.search_stock_name(query)
-                    if kr_result:
-                        ticker = kr_result.get('ticker')
-                        name   = kr_result.get('name', query)
-                        market = "KR"
-                except Exception:
-                    pass
-
-            # 3차: AI 티커 변환 (마지막 수단)
+ 
+            # 2차: AI로 티커 변환
             if not ticker:
                 res = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=100,
-                    messages=[{"role": "user", "content": f"""한국 주식 종목명을 티커로 변환해주세요.
+                    messages=[{"role": "user", "content": f"""한국 주식 종목명을 6자리 티커로 변환해주세요.
 종목명: {query}
-한국 종목이면 6자리 숫자, 미국 종목이면 영문 티커.
-JSON으로만: {{"ticker": "000000", "name": "정확한종목명", "market": "KR", "sector": "섹터명"}}"""}]
+반드시 실제 한국거래소 6자리 숫자 티커여야 합니다.
+JSON으로만: {{"ticker": "000000", "name": "정확한종목명", "sector": "섹터명"}}"""}]
                 )
                 text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
                 m    = re.search(r'\{.*\}', text, re.DOTALL)
                 if m:
                     info   = _json.loads(m.group())
-                    market = info.get('market', 'KR')
-                    ticker = info.get('ticker', '')
-                    if market == "KR":
-                        ticker = ticker.zfill(6)
+                    ticker = info.get('ticker', '').zfill(6)
                     name   = info.get('name', query)
                     sector = info.get('sector', '알 수 없음')
+                    market = "KR"
 
-                    # KIS로 검증
-                    try:
-                        verify = kis.get_kr_price(ticker) if market == "KR" else None
-                        if market == "KR" and (not verify or verify.get('price', 0) == 0):
-                            await update.message.reply_text(
-                                f"❌ {query} 종목을 찾을 수 없어요.\n"
-                                f"정확한 종목명이나 티커(6자리숫자/영문)를 입력해주세요.\n"
-                                f"예) /analyze 005930  /analyze 삼성전자  /analyze NVDA"
-                            )
-                            return
-                    except Exception:
-                        pass
+                    # KIS API로 티커 검증
+                    verify = kis.get_kr_price(ticker)
+                    if not verify or verify.get('price', 0) == 0:
+                        await update.message.reply_text(f"❌ {query} 티커({ticker}) 조회 실패. 정확한 종목코드를 입력해주세요.")
+                        return
  
         if not ticker:
             await update.message.reply_text(f"❌ {query} 종목을 찾을 수 없어요")
             return
  
         # ── 2. 기술적 데이터 수집 ─────────────────────
- 
+        # KR: KIS API 일봉 (yfinance 사용 안 함)
+        # US: yfinance (KIS API 미국 일봉 미지원)
+
         price_data = {}
         tech_data  = {}
- 
+
         if market == "KR":
+            # 실시간 현재가 (KIS)
             kis_data = kis.get_kr_price(ticker)
             if kis_data:
                 price_data = kis_data
-            yf_ticker = f"{ticker}.KS"
+
+            # 기술적 지표 (KIS 일봉)
+            try:
+                tech_data = kis.calc_indicators_kr(ticker, days=60)
+                if tech_data:
+                    print(f"  ✅ KIS 일봉 지표: RSI {tech_data.get('rsi')} MA5 {tech_data.get('ma5')}")
+                else:
+                    print(f"  ⚠️ KIS 일봉 지표 없음")
+            except Exception as e:
+                print(f"  ⚠️ KIS 일봉 실패: {e}")
+
         else:
+            # 미국 현재가 (KIS 실시간)
             for excd in ["NAS", "NYS", "AMS"]:
                 us_data = kis.get_us_price(ticker, excd)
                 if us_data and us_data.get('price', 0) > 0:
                     price_data = us_data
                     break
+            # KIS 실패 시 yfinance 폴백
             if not price_data:
-                yf_hist = yf.Ticker(ticker).history(period="2d").dropna()
-                if not yf_hist.empty:
-                    price_data = {
-                        'price':      round(yf_hist['Close'].iloc[-1], 2),
-                        'change_pct': round(((yf_hist['Close'].iloc[-1] - yf_hist['Close'].iloc[-2]) / yf_hist['Close'].iloc[-2]) * 100, 2),
+                try:
+                    yf_hist = yf.Ticker(ticker).history(period="2d").dropna()
+                    if not yf_hist.empty:
+                        price_data = {
+                            'price':      round(yf_hist['Close'].iloc[-1], 2),
+                            'change_pct': round(((yf_hist['Close'].iloc[-1] - yf_hist['Close'].iloc[-2]) / yf_hist['Close'].iloc[-2]) * 100, 2),
+                        }
+                except Exception:
+                    pass
+
+            # 미국 기술적 지표 (yfinance)
+            try:
+                hist = yf.Ticker(ticker).history(period="60d").dropna()
+                if len(hist) >= 20:
+                    close    = hist['Close']
+                    volume   = hist['Volume']
+                    current  = price_data.get('price', close.iloc[-1])
+                    avg_vol  = volume.mean()
+                    curr_vol = volume.iloc[-1]
+                    vol_ratio = round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1
+
+                    delta = close.diff()
+                    gain  = delta.clip(lower=0).rolling(14).mean()
+                    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                    rs    = gain / (loss.replace(0, 0.0001))
+                    rsi   = round((100 - 100 / (1 + rs)).iloc[-1], 1)
+
+                    ma5  = round(close.rolling(5).mean().iloc[-1], 2)
+                    ma20 = round(close.rolling(20).mean().iloc[-1], 2)
+                    ma60 = round(close.rolling(60).mean().iloc[-1], 2) if len(close) >= 60 else ma20
+
+                    obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
+                    obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
+
+                    high_52w = close.max()
+                    low_52w  = close.min()
+                    drawdown = round((current - high_52w) / high_52w * 100, 1)
+
+                    tech_data = {
+                        "rsi":       rsi,
+                        "ma5":       ma5,
+                        "ma20":      ma20,
+                        "ma60":      ma60,
+                        "vol_ratio": vol_ratio,
+                        "obv_trend": obv_trend,
+                        "drawdown":  drawdown,
+                        "high_52w":  round(high_52w, 2),
+                        "low_52w":   round(low_52w, 2),
                     }
-            yf_ticker = ticker
- 
-        # yfinance 기술적 지표
-        try:
-            hist = yf.Ticker(yf_ticker).history(period="60d").dropna()
-            if len(hist) >= 20:
-                close     = hist['Close']
-                volume    = hist['Volume']
-                current   = price_data.get('price', close.iloc[-1])
-                avg_vol   = volume.mean()
-                curr_vol  = volume.iloc[-1]
-                vol_ratio = round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1
- 
-                # RSI
-                delta = close.diff()
-                gain  = delta.clip(lower=0).rolling(14).mean()
-                loss  = (-delta.clip(upper=0)).rolling(14).mean()
-                rs    = gain / loss
-                rsi   = round((100 - (100 / (1 + rs))).iloc[-1], 1)
- 
-                # 이평선
-                ma5  = round(close.rolling(5).mean().iloc[-1], 2)
-                ma20 = round(close.rolling(20).mean().iloc[-1], 2)
- 
-                # OBV
-                obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
-                obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
- 
-                # 52주
-                high_52w  = close.max()
-                low_52w   = close.min()
-                drawdown  = round(((current - high_52w) / high_52w) * 100, 1)
- 
-                tech_data = {
-                    "rsi":       rsi,
-                    "ma5":       ma5,
-                    "ma20":      ma20,
-                    "vol_ratio": vol_ratio,
-                    "obv_trend": obv_trend,
-                    "drawdown":  drawdown,
-                    "high_52w":  round(high_52w, 2),
-                    "low_52w":   round(low_52w, 2),
-                }
-        except Exception as e:
-            print(f"  ⚠️ 기술적 데이터 실패: {e}")
+            except Exception as e:
+                print(f"  ⚠️ US 기술적 데이터 실패: {e}")
  
         # ── 3. 수급 데이터 (한국만) ───────────────────
  
