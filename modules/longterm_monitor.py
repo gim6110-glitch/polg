@@ -6,10 +6,10 @@ import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-sys.path.insert(0, '/media/dps/T7/stock_ai')
+sys.path.insert(0, '/home/dps/stock_ai')
 from modules.kis_api import KISApi
 
-load_dotenv('/media/dps/T7/stock_ai/.env')
+load_dotenv('/home/dps/stock_ai/.env')
 
 class LongtermMonitor:
     """
@@ -19,42 +19,81 @@ class LongtermMonitor:
     """
     def __init__(self):
         self.kis        = KISApi()
-        self.alert_file = "/media/dps/T7/stock_ai/data/longterm_alerts.json"
+        self.alert_file = "/home/dps/stock_ai/data/longterm_alerts.json"
         self.alerts     = self._load_alerts()
 
         # ── 중장기 테마 ──
         self.themes = {
             "AI반도체": {
-                "KR": {"삼성전자": "005930", "SK하이닉스": "000660", "한미반도체": "042700", "HPSP": "403870"},
+                "KR": {
+                    # 대장주
+                    "삼성전자": "005930", "SK하이닉스": "000660",
+                    # 2등주
+                    "한미반도체": "042700", "HPSP": "403870",
+                    # 소부장
+                    "원익IPS": "240810", "피에스케이": "319660",
+                    "이수페타시스": "097950", "후성": "093370",
+                },
                 "US": {"NVDA": "NVDA", "AMD": "AMD", "AVGO": "AVGO", "ASML": "ASML"}
             },
             "로봇": {
-                "KR": {"두산로보틱스": "454910", "레인보우로보틱스": "277810", "에스피지": "058610"},
-                "US": {}
+                "KR": {
+                    "두산로보틱스": "454910", "레인보우로보틱스": "277810",
+                    "에스피지": "058610", "스맥": "099440",
+                },
+                "US": {"ISRG": "ISRG", "ABB": "ABB"}
             },
             "원전/에너지": {
-                "KR": {"두산에너빌리티": "034020", "한전기술": "052690", "한전KPS": "051600"},
-                "US": {"VST": "VST", "CEG": "CEG", "NEE": "NEE"}
+                "KR": {
+                    # 대장주
+                    "두산에너빌리티": "034020",
+                    # 2등주
+                    "한전기술": "052690", "한전KPS": "051600",
+                    # 소부장
+                    "일진파워": "094820", "비에이치아이": "083650",
+                },
+                "US": {"VST": "VST", "CEG": "CEG", "NEE": "NEE", "KMI": "KMI"}
             },
             "양자컴퓨터": {
                 "KR": {},
-                "US": {"IONQ": "IONQ", "RGTI": "RGTI", "QUBT": "QUBT"}
+                "US": {"IONQ": "IONQ", "RGTI": "RGTI", "QUBT": "QUBT", "QBTS": "QBTS"}
             },
             "바이오/AI신약": {
-                "KR": {"삼성바이오로직스": "207940", "셀트리온": "068270", "에스티팜": "237690"},
-                "US": {"LLY": "LLY"}
+                "KR": {
+                    "삼성바이오로직스": "207940", "셀트리온": "068270",
+                    "에스티팜": "237690", "JW중외제약": "001060",
+                },
+                "US": {"LLY": "LLY", "RXRX": "RXRX", "MRNA": "MRNA"}
             },
             "우주항공": {
                 "KR": {"한국항공우주": "047810"},
-                "US": {"LUNR": "LUNR"}
+                "US": {"RKLB": "RKLB", "LUNR": "LUNR", "ASTS": "ASTS"}
             },
             "방산": {
-                "KR": {"한화에어로스페이스": "012450", "LIG넥스원": "079550", "한국항공우주": "047810"},
+                "KR": {
+                    "한화에어로스페이스": "012450", "LIG넥스원": "079550",
+                    "한국항공우주": "047810", "빅텍": "065450",
+                },
                 "US": {"LMT": "LMT", "RTX": "RTX", "NOC": "NOC"}
             },
-            "AI인프라": {
+            "AI인프라/빅테크": {
                 "KR": {},
-                "US": {"NVDA": "NVDA", "AVGO": "AVGO", "MSFT": "MSFT", "GOOGL": "GOOGL"}
+                "US": {"NVDA": "NVDA", "AVGO": "AVGO", "MSFT": "MSFT",
+                       "GOOGL": "GOOGL", "META": "META", "AAPL": "AAPL"}
+            },
+            "전력/전력기기": {
+                "KR": {
+                    "LS ELECTRIC": "010120", "HD현대일렉트릭": "267260",
+                    "효성중공업": "298040", "일진전기": "103590",
+                },
+                "US": {}
+            },
+            "2차전지": {
+                "KR": {
+                    "에코프로비엠": "247540", "삼성SDI": "006400",
+                    "엘앤에프": "066970", "포스코퓨처엠": "003670",
+                },
+                "US": {}
             },
         }
 
@@ -88,12 +127,12 @@ class LongtermMonitor:
         return True
 
     def _analyze_stock(self, name, ticker, market="KR"):
-        """종목 매수 타이밍 분석"""
+        """종목 분석 — 이동평균선 + 주봉 중심"""
         try:
             import yfinance as yf
 
             yf_ticker = f"{ticker}.KS" if market == "KR" else ticker
-            hist      = yf.Ticker(yf_ticker).history(period="3mo").dropna()
+            hist      = yf.Ticker(yf_ticker).history(period="6mo").dropna()
 
             if len(hist) < 20:
                 return None
@@ -101,35 +140,74 @@ class LongtermMonitor:
             close  = hist['Close']
             volume = hist['Volume']
 
-            current   = close.iloc[-1]
-            high_3m   = close.max()
-            low_3m    = close.min()
-            avg_vol   = volume.mean()
-            curr_vol  = volume.iloc[-1]
+            current  = close.iloc[-1]
+            avg_vol  = volume.mean()
+            curr_vol = volume.iloc[-1]
             vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 1
 
-            # 52주 저점 대비
-            hist_1y  = yf.Ticker(yf_ticker).history(period="1y").dropna()
-            low_52w  = hist_1y['Close'].min() if len(hist_1y) > 0 else low_3m
-            from_low = ((current - low_52w) / low_52w) * 100
+            # ── 이동평균선 ──
+            ma5   = close.rolling(5).mean()
+            ma20  = close.rolling(20).mean()
+            ma60  = close.rolling(60).mean() if len(close) >= 60 else ma20
 
-            # 고점 대비 하락률
+            ma5_val  = ma5.iloc[-1]
+            ma20_val = ma20.iloc[-1]
+            ma60_val = ma60.iloc[-1]
+
+            # 정배열 (5 > 20 > 60)
+            is_bullish_array = ma5_val > ma20_val > ma60_val
+
+            # 5일선 위/아래
+            above_ma5  = current > ma5_val
+            above_ma20 = current > ma20_val
+            above_ma60 = current > ma60_val
+
+            # 5일선 눌림 (현재가가 5일선 아래지만 전일 위였던 경우)
+            ma5_prev   = ma5.iloc[-2] if len(ma5) >= 2 else ma5_val
+            ma5_touch  = not above_ma5 and (close.iloc[-2] > ma5_prev if len(close) >= 2 else False)
+
+            # 20일선 대비 위치
+            ma20_gap = ((current - ma20_val) / ma20_val) * 100
+
+            # 고점 대비 하락률 (3개월)
+            high_3m  = close.max()
             drawdown = ((current - high_3m) / high_3m) * 100
 
-            # RSI
+            # 52주 데이터
+            hist_1y = yf.Ticker(yf_ticker).history(period="1y").dropna()
+            high_52w = hist_1y['Close'].max() if len(hist_1y) > 0 else high_3m
+            low_52w  = hist_1y['Close'].min() if len(hist_1y) > 0 else current
+            from_low = ((current - low_52w) / low_52w) * 100
+            ath_prox = (current / high_52w) * 100  # 신고가 근접도
+
+            # 거래량 패턴
+            vol_5d    = volume.tail(5).mean()
+            vol_trend = vol_5d / avg_vol if avg_vol > 0 else 1
+
+            # 하락 시 거래량 감소 + 반등 시 증가 (건강한 눌림)
+            recent_down_days  = close.diff().iloc[-5:] < 0
+            recent_down_vols  = volume.iloc[-5:][recent_down_days].mean() if recent_down_days.any() else avg_vol
+            recent_up_days    = close.diff().iloc[-5:] > 0
+            recent_up_vols    = volume.iloc[-5:][recent_up_days].mean() if recent_up_days.any() else avg_vol
+            healthy_pullback  = recent_up_vols > recent_down_vols  # 상승 거래량 > 하락 거래량
+
+            # 주봉 데이터
+            try:
+                weekly = yf.Ticker(yf_ticker).history(period="6mo", interval="1wk").dropna()
+                wma5   = weekly['Close'].rolling(5).mean().iloc[-1] if len(weekly) >= 5 else ma20_val
+                wma20  = weekly['Close'].rolling(20).mean().iloc[-1] if len(weekly) >= 20 else ma60_val
+                above_wma5  = current > wma5
+                above_wma20 = current > wma20
+            except:
+                above_wma5  = above_ma20
+                above_wma20 = above_ma60
+
+            # RSI (보조 지표로만)
             delta = close.diff()
             gain  = delta.clip(lower=0).rolling(14).mean()
             loss  = (-delta.clip(upper=0)).rolling(14).mean()
             rs    = gain / loss
-            rsi   = (100 - (100 / (1 + rs))).iloc[-1]
-
-            # 5일 거래량 추세
-            vol_5d    = volume.tail(5).mean()
-            vol_trend = vol_5d / avg_vol
-
-            # 5일선 돌파 여부
-            ma5        = close.rolling(5).mean()
-            above_ma5  = close.iloc[-1] > ma5.iloc[-1]
+            rsi   = round((100 - (100 / (1 + rs))).iloc[-1], 1)
 
             # KIS 실시간 가격
             if market == "KR":
@@ -141,121 +219,218 @@ class LongtermMonitor:
                     if kis_data and kis_data.get('price', 0) > 0:
                         break
 
-            if kis_data:
+            if kis_data and kis_data.get('price', 0) > 0:
                 current = kis_data['price']
 
             return {
-                "name":       name,
-                "ticker":     ticker,
-                "market":     market,
-                "price":      current,
-                "high_3m":    high_3m,
-                "low_3m":     low_3m,
-                "low_52w":    low_52w,
-                "from_low":   round(from_low, 1),
-                "drawdown":   round(drawdown, 1),
-                "rsi":        round(rsi, 1),
-                "vol_ratio":  round(vol_ratio, 1),
-                "vol_trend":  round(vol_trend, 2),
-                "above_ma5":  above_ma5,
+                "name":            name,
+                "ticker":          ticker,
+                "market":          market,
+                "price":           current,
+                "ma5":             round(ma5_val, 2),
+                "ma20":            round(ma20_val, 2),
+                "ma60":            round(ma60_val, 2),
+                "above_ma5":       above_ma5,
+                "above_ma20":      above_ma20,
+                "above_ma60":      above_ma60,
+                "is_bullish_array": is_bullish_array,
+                "ma5_touch":       ma5_touch,
+                "ma20_gap":        round(ma20_gap, 1),
+                "above_wma5":      above_wma5,
+                "above_wma20":     above_wma20,
+                "healthy_pullback": healthy_pullback,
+                "high_3m":         high_3m,
+                "high_52w":        high_52w,
+                "low_52w":         low_52w,
+                "from_low":        round(from_low, 1),
+                "drawdown":        round(drawdown, 1),
+                "ath_prox":        round(ath_prox, 1),
+                "rsi":             rsi,
+                "vol_ratio":       round(vol_ratio, 1),
+                "vol_trend":       round(vol_trend, 2),
+                "healthy_pullback": healthy_pullback,
             }
         except Exception as e:
             return None
 
     def _is_buy_timing(self, data, is_gamble=False):
         """
-        매수 타이밍 판단
-        is_gamble=True 면 도박 종목 기준 (더 엄격)
+        매수 타이밍 판단 — 장세 연동 + 이동평균선 중심
+        RSI는 극단값만 참조
         """
         signals = []
         score   = 0
 
-        drawdown  = data.get('drawdown', 0)
-        rsi       = data.get('rsi', 50)
-        vol_ratio = data.get('vol_ratio', 1)
-        vol_trend = data.get('vol_trend', 1)
-        from_low  = data.get('from_low', 100)
-        above_ma5 = data.get('above_ma5', False)
+        # ── 장세 로드 ──
+        cycle_stage = "상승중"
+        try:
+            from modules.market_regime import MarketRegime
+            strategy    = MarketRegime().load_strategy()
+            cycle_stage = strategy.get("cycle_stage", "상승중")
+        except:
+            pass
+
+        drawdown       = data.get('drawdown', 0)
+        rsi            = data.get('rsi', 50)
+        vol_ratio      = data.get('vol_ratio', 1)
+        vol_trend      = data.get('vol_trend', 1)
+        from_low       = data.get('from_low', 100)
+        above_ma5      = data.get('above_ma5', False)
+        above_ma20     = data.get('above_ma20', False)
+        above_ma60     = data.get('above_ma60', False)
+        is_bull_array  = data.get('is_bullish_array', False)
+        ma5_touch      = data.get('ma5_touch', False)
+        ma20_gap       = data.get('ma20_gap', 0)
+        above_wma5     = data.get('above_wma5', False)
+        above_wma20    = data.get('above_wma20', False)
+        ath_prox       = data.get('ath_prox', 90)
+        healthy_pb     = data.get('healthy_pullback', False)
 
         if is_gamble:
-            # 도박 종목 — 52주 저점 근처 + 반등 시작 조건
+            # 도박: 52주 저점 근처 + 반등 시작
             if from_low <= 20:
                 score += 3
-                signals.append(f"📉 52주 저점 근처 (저점 대비 +{from_low:.0f}%)")
+                signals.append(f"📉 52주 저점 근처 (+{from_low:.0f}%)")
             elif from_low <= 40:
                 score += 1
-                signals.append(f"📉 52주 저점 대비 +{from_low:.0f}% (아직 저평가)")
-
-            if rsi <= 35:
-                score += 3
-                signals.append(f"✅ RSI {rsi:.0f} 과매도 → 반등 가능")
-            elif rsi <= 45:
-                score += 2
-                signals.append(f"✅ RSI {rsi:.0f} 매수 구간")
-
+                signals.append(f"📉 저점 대비 +{from_low:.0f}%")
             if above_ma5:
                 score += 2
-                signals.append("📈 5일선 돌파 → 반등 시작 신호")
-
+                signals.append("📈 5일선 돌파 → 반등 시작")
             if vol_ratio >= 2:
                 score += 3
-                signals.append(f"💥 거래량 {vol_ratio:.1f}배 급증 → 세력 유입 가능성")
+                signals.append(f"💥 거래량 {vol_ratio:.1f}배 급증")
             elif vol_ratio >= 1.5:
                 score += 1
-                signals.append(f"📦 거래량 {vol_ratio:.1f}배 증가")
-
-            # 도박 기준: 5점 이상 (중장기보다 높게)
+                signals.append(f"📦 거래량 {vol_ratio:.1f}배")
+            if rsi <= 35:
+                score += 2
+                signals.append(f"✅ RSI {rsi:.0f} 과매도")
             return score, signals
+
+        # ── 중장기: 장세별 차등 적용 ──
+
+        if cycle_stage in ["초입", "상승중", "가속"]:
+            # 강세장 — 신고가 = 매수 신호, 이평선 정배열 중심
+
+            # 1. 정배열 확인 (핵심)
+            if is_bull_array:
+                score += 3
+                signals.append("✅ 5>20>60일 정배열 (강세 추세)")
+            elif above_ma20:
+                score += 1
+                signals.append("✅ 20일선 위 유지")
+
+            # 2. 주봉 강세 확인
+            if above_wma5 and above_wma20:
+                score += 2
+                signals.append("✅ 주봉 강세 (5주>20주선 위)")
+            elif above_wma5:
+                score += 1
+                signals.append("✅ 주봉 5주선 위")
+
+            # 3. 신고가 근접 = 강세장에선 매수 신호
+            if ath_prox >= 97:
+                score += 2
+                signals.append(f"🏔 52주 신고가 근접 ({ath_prox:.1f}%)")
+            elif ath_prox >= 90:
+                score += 1
+                signals.append(f"📊 신고가 대비 -{100-ath_prox:.1f}%")
+
+            # 4. 5일선 눌림 = 진입 기회
+            if ma5_touch:
+                score += 2
+                signals.append("📉 5일선 눌림 → 진입 기회")
+            elif -3 <= ma20_gap <= 3:
+                score += 1
+                signals.append(f"📊 20일선 근처 ({ma20_gap:+.1f}%)")
+
+            # 5. 거래량 패턴
+            if healthy_pb:
+                score += 2
+                signals.append("📦 건강한 눌림 (상승 거래량 > 하락 거래량)")
+            elif vol_trend >= 1.3:
+                score += 1
+                signals.append(f"📦 거래량 증가 ({vol_trend:.1f}배)")
+
+            # 6. RSI — 극단값만
+            if rsi >= 90:
+                score -= 2
+                signals.append(f"🌡️ RSI {rsi:.0f} 극과열 주의")
+            elif rsi >= 80:
+                score -= 1
+                signals.append(f"⚠️ RSI {rsi:.0f} 과열")
+
+        elif cycle_stage in ["과열경계", "과열"]:
+            # 과열 구간 — 더 엄격, 눌림목 확인 필수
+
+            # 1. 눌림목 필수
+            if -15 <= drawdown <= -5:
+                score += 3
+                signals.append(f"📉 고점 대비 {drawdown:.1f}% 눌림 (진입 기회)")
+            elif -5 < drawdown <= -2:
+                score += 1
+                signals.append(f"📉 소폭 조정 {drawdown:.1f}%")
+            elif drawdown > -2:
+                score -= 1  # 과열 구간에서 신고가 = 위험
+                signals.append(f"⚠️ 과열 구간 신고가 근처 — 추격 금지")
+
+            # 2. 20일선 위 + 정배열
+            if is_bull_array and above_ma20:
+                score += 2
+                signals.append("✅ 정배열 유지")
+
+            # 3. 주봉 지지 확인
+            if above_wma5:
+                score += 1
+                signals.append("✅ 주봉 5주선 지지")
+
+            # 4. 거래량
+            if healthy_pb:
+                score += 2
+                signals.append("📦 건강한 눌림")
+
+            # 5. RSI
+            if rsi >= 80:
+                score -= 2
+                signals.append(f"🌡️ RSI {rsi:.0f} 과열 — 비중 축소")
+            elif rsi >= 70:
+                score -= 1
+                signals.append(f"⚠️ RSI {rsi:.0f} 다소 과열")
 
         else:
-            # 중장기 종목 기준 — 장세별 유동적 판단
-            # 1. 눌림목 (조정 후 반등)
-            if -30 <= drawdown <= -10:
+            # 조정초입/조정중 — 보수적, 60일선 지지 확인
+
+            # 1. 60일선 위 + 반등
+            if above_ma60 and above_ma20:
+                score += 2
+                signals.append("✅ 60/20일선 위 (하락 방어)")
+            elif above_ma60:
+                score += 1
+                signals.append("✅ 60일선 지지")
+
+            # 2. 큰 눌림목
+            if -30 <= drawdown <= -15:
                 score += 3
-                signals.append(f"📉 고점 대비 {drawdown:.1f}% 눌림목")
-            elif -10 < drawdown <= -5:
-                score += 2
-                signals.append(f"📉 고점 대비 {drawdown:.1f}% 소폭 조정")
-            elif -5 < drawdown <= 0:
+                signals.append(f"📉 {drawdown:.1f}% 대폭 조정 (분할 매수)")
+            elif -15 < drawdown <= -8:
                 score += 1
-                signals.append(f"📊 고점 근처 유지 중 (강세 지속)")
+                signals.append(f"📉 {drawdown:.1f}% 조정")
 
-            # 2. RSI — 강세장엔 60~75도 유효
-            if 35 <= rsi <= 55:
+            # 3. 주봉 20주선 위 = 장기 강세 유지
+            if above_wma20:
+                score += 2
+                signals.append("✅ 주봉 20주선 위 (장기 강세)")
+
+            # 4. RSI 과매도
+            if rsi <= 30:
                 score += 3
-                signals.append(f"✅ RSI {rsi:.0f} 매수 적정 구간")
-            elif 55 < rsi <= 70:
-                score += 2
-                signals.append(f"⚠️ RSI {rsi:.0f} 강세 구간 (추세 추종)")
-            elif 70 < rsi <= 80:
+                signals.append(f"✅ RSI {rsi:.0f} 과매도 → 반등")
+            elif rsi <= 40:
                 score += 1
-                signals.append(f"⚠️ RSI {rsi:.0f} 다소 과열, 분할 매수")
-            elif rsi < 35:
-                score += 2
-                signals.append(f"✅ RSI {rsi:.0f} 과매도 → 반등 가능")
+                signals.append(f"✅ RSI {rsi:.0f} 매수 구간")
 
-            # 3. 거래량 증가 추세
-            if vol_trend >= 1.3:
-                score += 2
-                signals.append(f"📦 거래량 증가 추세 ({vol_trend:.1f}배)")
-            elif vol_trend >= 1.1:
-                score += 1
-                signals.append(f"📦 거래량 소폭 증가")
-
-            # 4. 당일 거래량 급증
-            if vol_ratio >= 2:
-                score += 2
-                signals.append(f"💥 당일 거래량 {vol_ratio:.1f}배 급증")
-            elif vol_ratio >= 1.5:
-                score += 1
-                signals.append(f"📦 당일 거래량 {vol_ratio:.1f}배 증가")
-
-            # 5. 5일선 위 (추세 유지)
-            if above_ma5:
-                score += 1
-                signals.append("📈 5일선 위 → 단기 상승 추세")
-
-            return score, signals
+        return score, signals
 
     async def scan_all_themes(self, news_list=None):
         """전체 테마 + 도박 watchlist 스캔"""
@@ -289,46 +464,65 @@ class LongtermMonitor:
         buy_signals    = []
         gamble_signals = []
 
-        # ── 중장기 테마 스캔 ──
-        # 재무 필터 초기화 (적자 종목 제외, 도박은 별도)
+        # ── sector_db 전체 종목 스캔 (동적 발굴) ──
         try:
             from modules.financial_filter import FinancialFilter
             ff = FinancialFilter()
         except Exception:
             ff = None
 
-        for theme_name, markets in self.themes.items():
-            for market, stocks in markets.items():
-                for name, ticker in stocks.items():
+        from modules.sector_db import SECTOR_DB
 
-                    # 재무 필터: 적자 종목 제외 (도박 아닌 중장기만)
-                    if ff:
-                        try:
-                            if not ff.is_profitable(ticker, market):
-                                print(f"  🚫 적자 제외: {name} ({ticker})")
-                                time.sleep(0.1)
-                                continue
-                        except Exception:
-                            pass
+        seen_tickers = set()  # 중복 방지
 
-                    data = self._analyze_stock(name, ticker, market)
-                    if not data:
-                        continue
+        for sector_name, sector_data in SECTOR_DB.items():
+            market = sector_data.get('market', 'KR')
 
-                    score, signals = self._is_buy_timing(data, is_gamble=False)
+            # 회피 섹터 제외
+            if any(av.lower() in sector_name.lower() for av in avoid_sectors):
+                continue
 
-                    if score >= lt_threshold:
-                        alert_key = f"longterm_{ticker}_{market}"
-                        if not self._can_alert(alert_key, cooldown_hours=24):
+            all_stocks = {}
+            all_stocks.update(sector_data.get('대장주', {}))
+            all_stocks.update(sector_data.get('2등주', {}))
+            # 소부장 처리
+            for sub in sector_data.get('소부장', {}).values():
+                if isinstance(sub, dict):
+                    all_stocks.update(sub)
+
+            for name, ticker in all_stocks.items():
+                if ticker in seen_tickers:
+                    continue
+                seen_tickers.add(ticker)
+
+                # 재무 필터
+                if ff:
+                    try:
+                        if not ff.is_profitable(ticker, market):
+                            print(f"  🚫 적자 제외: {name}")
+                            time.sleep(0.1)
                             continue
-                        data['theme']   = theme_name
-                        data['score']   = score
-                        data['signals'] = signals
-                        data['type']    = '중장기'
-                        buy_signals.append(data)
-                        print(f"  🔔 중장기 타이밍: {name} (점수:{score})")
+                    except Exception:
+                        pass
 
-                    time.sleep(0.2)
+                data = self._analyze_stock(name, ticker, market)
+                if not data:
+                    continue
+
+                score, signals = self._is_buy_timing(data, is_gamble=False)
+
+                if score >= lt_threshold:
+                    alert_key = f"longterm_{ticker}"
+                    if not self._can_alert(alert_key, cooldown_hours=24):
+                        continue
+                    data['theme']   = sector_name
+                    data['score']   = score
+                    data['signals'] = signals
+                    data['type']    = '중장기'
+                    buy_signals.append(data)
+                    print(f"  🔔 중장기 타이밍: {name} (점수:{score})")
+
+                time.sleep(0.2)
 
         # ── 도박 watchlist 스캔 ──
         for ticker, info in self.gamble_watchlist.items():
@@ -413,12 +607,9 @@ JSON으로만 답변:
                 try:
                     data = json.loads(m.group())
                 except json.JSONDecodeError:
-                    try:
-                        clean = re.sub(r',\s*}', '}', m.group())
-                        clean = re.sub(r',\s*]', ']', clean)
-                        data  = json.loads(clean)
-                    except:
-                        return candidates  # 파싱 실패 시 AI 검증 없이 반환
+                    clean = re.sub(r',\s*}', '}', m.group())
+                    clean = re.sub(r',\s*]', ']', clean)
+                    data  = json.loads(clean)
                 verified = {v['ticker']: v for v in data.get('verified', []) if v.get('buy_now')}
                 result   = []
                 for c in candidates:
@@ -428,113 +619,103 @@ JSON으로만 답변:
                 return result
         except Exception as e:
             print(f"  ❌ AI 검증 실패: {e}")
-        # AI 검증 없이 바로 반환
         return candidates
 
     def build_alert_message(self, signals):
-        """중장기 + 도박 매수 타이밍 알림 (분리)"""
+        """중장기 매수 타이밍 알림 — 한국/미국 분리, 간결"""
         if not signals:
             return None
 
         middle  = [s for s in signals if s.get('type') == '중장기']
         gambles = [s for s in signals if s.get('type') == '도박']
 
-        msg = f"🔔 <b>매수 타이밍 알림</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
+        def priority_score(s):
+            """진입가 근접 + 목표가 빠른 달성 예상 순"""
+            price  = s.get('price', 1)
+            rsi    = s.get('rsi', 50)
+            draw   = abs(s.get('drawdown', 0))
+            score  = s.get('score', 0)
+            # RSI 낮을수록 + 눌림목 클수록 + 점수 높을수록 우선
+            return -(score * 10 + draw + (70 - rsi))
 
-        if middle:
-            msg += "📊 <b>중장기 타이밍</b>\n"
-            msg += "━━━━━━━━━━━━━━━━━━━\n"
-            for s in middle[:3]:
-                market   = s.get('market', 'KR')
-                currency = "$" if market == "US" else "₩"
-                price    = s.get('price', 0)
+        # 한국/미국 분리 + 우선순위 정렬
+        kr_signals = sorted([s for s in middle if s.get('market') == 'KR'], key=priority_score)
+        us_signals = sorted([s for s in middle if s.get('market') == 'US'], key=priority_score)
 
-                # 목표가/손절가 — KIS 실시간 가격 기준으로 계산
-                target = s.get('target', 0)
-                stop   = s.get('stop_loss', 0)
-                if not target or target <= 0:
-                    target = round(price * 1.20, 0) if market == "KR" else round(price * 1.20, 2)
-                if not stop or stop <= 0:
-                    stop = round(price * 0.88, 0) if market == "KR" else round(price * 0.88, 2)
+        msg = f"🔔 <b>중장기 매수 타이밍</b> {datetime.now().strftime('%m/%d %H:%M')}\n\n"
 
-                # 목표가가 현재가보다 낮으면 수정
-                if target < price:
-                    target = round(price * 1.20, 0) if market == "KR" else round(price * 1.20, 2)
-                if stop > price:
-                    stop = round(price * 0.88, 0) if market == "KR" else round(price * 0.88, 2)
+        def fmt_stock(s):
+            market   = s.get('market', 'KR')
+            currency = "$" if market == "US" else "₩"
+            price    = s.get('price', 0)
+            rsi      = s.get('rsi', 50)
+            drawdown = s.get('drawdown', 0)
 
-                profit = ((target - price) / price) * 100 if price > 0 else 0
-                sigs   = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
-
-                # 매수가 계산
-                rsi      = s.get('rsi', 50)
-                drawdown = s.get('drawdown', 0)
-
-                # 매수 타이밍 판단
-                if rsi <= 40 or drawdown <= -10:
-                    buy_timing  = "지금 바로 진입 가능"
-                    buy1 = round(price * 0.99, 0) if market == "KR" else round(price * 0.99, 2)
-                    buy2 = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
-                    timing_emoji = "🟢"
-                elif rsi <= 55:
-                    buy_timing  = "조정 시 진입 (1~3% 빠지면 매수)"
-                    buy1 = round(price * 0.98, 0) if market == "KR" else round(price * 0.98, 2)
-                    buy2 = round(price * 0.95, 0) if market == "KR" else round(price * 0.95, 2)
-                    timing_emoji = "🟡"
+            # 목표가 — AI 검증 결과 또는 기본값
+            target = s.get('target', 0)
+            stop   = s.get('stop_loss', 0)
+            if not target or target <= price:
+                # 점수/RSI 기반 동적 목표가
+                if s.get('score', 0) >= 6:
+                    target = round(price * 1.30, 0) if market == "KR" else round(price * 1.30, 2)
+                elif rsi < 40:
+                    target = round(price * 1.25, 0) if market == "KR" else round(price * 1.25, 2)
                 else:
-                    buy_timing  = "기다렸다가 눌림목 진입 (3~5% 조정 후)"
-                    buy1 = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
-                    buy2 = round(price * 0.94, 0) if market == "KR" else round(price * 0.94, 2)
-                    timing_emoji = "🔴"
+                    target = round(price * 1.20, 0) if market == "KR" else round(price * 1.20, 2)
+            if not stop or stop >= price:
+                stop = round(price * 0.88, 0) if market == "KR" else round(price * 0.88, 2)
 
-                fmt = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
+            # 매수 타이밍 + 매수가
+            if rsi <= 40 or drawdown <= -10:
+                timing = "🟢 지금 바로"
+                buy1   = round(price * 0.99, 0) if market == "KR" else round(price * 0.99, 2)
+                buy2   = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
+            elif rsi <= 55:
+                timing = "🟡 조정 시"
+                buy1   = round(price * 0.98, 0) if market == "KR" else round(price * 0.98, 2)
+                buy2   = round(price * 0.95, 0) if market == "KR" else round(price * 0.95, 2)
+            else:
+                timing = "🔴 눌림목 후"
+                buy1   = round(price * 0.97, 0) if market == "KR" else round(price * 0.97, 2)
+                buy2   = round(price * 0.94, 0) if market == "KR" else round(price * 0.94, 2)
 
-                msg += f"""🎯 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]
+            profit = ((target - price) / price * 100) if price > 0 else 0
+            entry  = "NXT/장전" if market == "KR" else "프리마켓"
+            fmt    = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
 
-{sigs}
+            return (
+                f"🎯 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]\n"
+                f"{timing} | 현재가: {currency}{fmt(price)}\n"
+                f"1차: {currency}{fmt(buy1)} ({entry})\n"
+                f"2차: {currency}{fmt(buy2)}\n"
+                f"목표: {currency}{fmt(target)} (+{profit:.0f}%) | 손절: {currency}{fmt(stop)}\n"
+            )
 
-💡 {s.get('reason', '')}
-{timing_emoji} 진입: {buy_timing}
-💰 현재가:  {currency}{fmt(price)}
-🟢 1차매수: {currency}{fmt(buy1)} (NXT/장전)
-🟡 2차매수: {currency}{fmt(buy2)} (추가 눌림)
-🎯 목표가:  {currency}{fmt(target)} (+{profit:.0f}%, {s.get('timeframe', '3~6개월')})
-🛑 손절가:  {currency}{fmt(stop)}
+        if kr_signals:
+            msg += "🇰🇷 <b>한국</b>\n━━━━━━━━━━━━━━━\n"
+            for s in kr_signals[:3]:
+                msg += fmt_stock(s) + "\n"
 
-"""
+        if us_signals:
+            msg += "🇺🇸 <b>미국</b>\n━━━━━━━━━━━━━━━\n"
+            for s in us_signals[:3]:
+                msg += fmt_stock(s) + "\n"
 
         if gambles:
-            msg += "🎰 <b>도박 타이밍</b> (소액만!)\n"
-            msg += "━━━━━━━━━━━━━━━━━━━\n"
+            msg += "🎰 <b>도박</b> (총자산 2% 이하)\n━━━━━━━━━━━━━━━\n"
             for s in gambles[:3]:
                 market   = s.get('market', 'US')
                 currency = "$" if market == "US" else "₩"
                 price    = s.get('price', 0)
-                target   = s.get('target', 0)
-                stop     = s.get('stop_loss', 0)
-
-                if not target or target <= price:
-                    target = round(price * 3.0, 2)
-                if not stop or stop >= price:
-                    stop = round(price * 0.80, 2)
-
-                sigs = "\n".join([f"   {sg}" for sg in s.get('signals', [])[:3]])
-                buy1 = round(price * 0.99, 2)
-                fmt  = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
-
-                msg += f"""🎲 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]
-
-{sigs}
-
-💡 {s.get('reason', s.get('memo', ''))}
-🟢 진입: 조건 충족 즉시 (5일선 돌파 확인)
-💰 현재가:  {currency}{fmt(price)}
-🟢 매수가:  {currency}{fmt(buy1)}
-🎯 목표:   {currency}{fmt(target)} (3~5배)
-🛑 손절:   {currency}{fmt(stop)} (-20%)
-⚠️ 총자산 2% 이하 소액만!
-
-"""
+                target   = round(price * 3.0, 2)
+                stop     = round(price * 0.80, 2)
+                buy1     = round(price * 0.99, 2)
+                fmt      = lambda v: f"{int(v):,}" if market == "KR" else f"{v:.2f}"
+                msg += (
+                    f"🎲 <b>{s['name']}</b> ({s['ticker']}) [{s['theme']}]\n"
+                    f"현재가: {currency}{fmt(price)} | 매수: {currency}{fmt(buy1)}\n"
+                    f"목표: {currency}{fmt(target)} (3~5배) | 손절: {currency}{fmt(stop)}\n\n"
+                )
 
         msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         return msg
