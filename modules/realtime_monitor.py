@@ -4,7 +4,7 @@ import json
 import asyncio
 import time
 from datetime import datetime, timedelta
-from anomaly_detector import check_anomalies
+from modules.anomaly_detector import check_anomalies
 
 sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
