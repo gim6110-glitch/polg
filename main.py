@@ -434,70 +434,91 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 미국 티커 판단 (영문자만)
         is_us_ticker = query.isalpha() and query.isupper() and len(query) <= 5
  
-        ticker   = None
-        name     = query
-        market   = None
-        sector   = "알 수 없음"
- 
-        if is_us_ticker:
-            # 미국 티커 직접 사용
+
+        # 종목 식별
+        ticker = None
+        name   = query
+        market = None
+        sector = "알 수 없음"
+
+        if query.isdigit() and len(query) == 6:
+            # KR 6자리 숫자 티커 직접
+            ticker = query
+            market = "KR"
+            for sector_name, sector_data in SECTOR_DB.items():
+                if sector_data.get('market', 'KR') != 'KR':
+                    continue
+                for tier in ['대장주', '2등주', '소부장']:
+                    tier_data = sector_data.get(tier, {})
+                    if not isinstance(tier_data, dict):
+                        continue
+                    for sname, sticker in tier_data.items():
+                        if sticker == ticker:
+                            name = sname
+                            sector = sector_name
+                            break
+                if name != query:
+                    break
+
+        elif query.upper().isalpha() and len(query) <= 5:
+            # US 티커 직접
             ticker = query.upper()
             market = "US"
-            # sector_db에서 섹터 찾기
             for sector_name, sector_data in SECTOR_DB.items():
                 if sector_data.get('market') != 'US':
                     continue
                 for tier in ['대장주', '2등주']:
                     for sname, sticker in sector_data.get(tier, {}).items():
                         if sticker == ticker:
-                            name   = sname
+                            name = sname
                             sector = sector_name
                             break
-        else:
-            # 한국 종목명 → 티커 변환
-            # 1차: sector_db에서 검색
-            for sector_name, sector_data in SECTOR_DB.items():
-                if sector_data.get('market') != 'KR':
-                    continue
-                for tier in ['대장주', '2등주', '소부장']:
-                    for sname, sticker in sector_data.get(tier, {}).items():
-                        if query in sname or sname in query:
-                            ticker = sticker
-                            name   = sname
-                            market = "KR"
-                            sector = sector_name
-                            break
-                if ticker:
+                if name != query:
                     break
- 
-            # 2차: AI로 티커 변환
+
+        else:
+            # 종목명 → sector_db 정확도 매칭
+            best_match = None
+            best_score = 999
+            for sector_name, sector_data in SECTOR_DB.items():
+                mkt = sector_data.get('market', 'KR')
+                for tier in ['대장주', '2등주', '소부장']:
+                    tier_data = sector_data.get(tier, {})
+                    if not isinstance(tier_data, dict):
+                        continue
+                    for sname, sticker in tier_data.items():
+                        if sname == query:
+                            best_match = (sticker, sname, sector_name, mkt)
+                            best_score = 0
+                            break
+                        if query in sname and len(sname) < best_score:
+                            best_match = (sticker, sname, sector_name, mkt)
+                            best_score = len(sname)
+                if best_score == 0:
+                    break
+            if best_match:
+                ticker, name, sector, market = best_match
+
+            # AI 변환 (마지막 수단)
             if not ticker:
                 res = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=100,
-                    messages=[{"role": "user", "content": f"""한국 주식 종목명을 6자리 티커로 변환해주세요.
-종목명: {query}
-반드시 실제 한국거래소 6자리 숫자 티커여야 합니다.
-JSON으로만: {{"ticker": "000000", "name": "정확한종목명", "sector": "섹터명"}}"""}]
+                    messages=[{"role": "user", "content": f"한국 주식 종목명을 티커로 변환. 종목명: {query}. 한국이면 6자리 숫자, 미국이면 영문. JSON으로만: {{\"ticker\": \"000000\", \"name\": \"종목명\", \"market\": \"KR\", \"sector\": \"섹터\"}}"}]
                 )
                 text = re.sub(r'```json|```', '', res.content[0].text.strip()).strip()
-                m    = re.search(r'\{.*\}', text, re.DOTALL)
+                m = re.search(r'\{.*\}', text, re.DOTALL)
                 if m:
-                    info   = _json.loads(m.group())
-                    ticker = info.get('ticker', '').zfill(6)
-                    name   = info.get('name', query)
+                    info = _json.loads(m.group())
+                    market = info.get('market', 'KR')
+                    ticker = info.get('ticker', '').zfill(6) if info.get('market', 'KR') == 'KR' else info.get('ticker', '')
+                    name = info.get('name', query)
                     sector = info.get('sector', '알 수 없음')
-                    market = "KR"
-
-                    # KIS API로 티커 검증
-                    verify = kis.get_kr_price(ticker)
-                    if not verify or verify.get('price', 0) == 0:
-                        await update.message.reply_text(f"❌ {query} 티커({ticker}) 조회 실패. 정확한 종목코드를 입력해주세요.")
-                        return
- 
-        if not ticker:
-            await update.message.reply_text(f"❌ {query} 종목을 찾을 수 없어요")
-            return
+                    if market == "KR":
+                        verify = kis.get_kr_price(ticker)
+                        if not verify or verify.get('price', 0) == 0:
+                            await update.message.reply_text(f"❌ {query} 종목을 찾을 수 없어요.")
+                            return
  
         # ── 2. 기술적 데이터 수집 ─────────────────────
         # KR: KIS API 일봉 (yfinance 사용 안 함)
