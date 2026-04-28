@@ -1125,7 +1125,7 @@ async def cmd_supply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── 스마트 스캔 ──
 async def smart_scan(notify_all=False):
     """장세 전환 감지 (30분마다)"""
-    r           = regime.analyze_regime_sync()
+    r           = regime.current_regime
     regime_type = r['regime']
     em          = regime.get_regime_emoji()
     print(f"[{datetime.now().strftime('%H:%M')}] {em} {regime_type}장 체크")
@@ -1183,7 +1183,10 @@ async def premarket_morning_scan():
     try:
         nc   = NewsCollector()
         news = nc.collect_news(max_per_feed=5)
-        news = nc.filter_by_importance(news)
+        try:
+            news = nc.filter_by_importance(news)
+        except Exception:
+            pass  # 필터링 실패 시 원본 뉴스 사용
         candidates, hot_sectors = await pm.scan_top_candidates(news)
         msg = pm.build_premarket_message(candidates, hot_sectors)
         await send(msg)
@@ -1227,7 +1230,7 @@ async def morning_briefing():
         return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌅 아침 브리핑")
     try:
-        r          = regime.analyze_regime_sync()
+        r          = regime.current_regime
         params     = regime.get_strategy_params()
         em         = regime.get_regime_emoji()
         news       = NewsCollector().collect_news(max_per_feed=5)
@@ -1386,7 +1389,10 @@ async def closing_summary():
     try:
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
 
         # 오늘 섹터별 결과 수집
         sector_results = ca.get_today_movers()
@@ -1505,7 +1511,10 @@ async def morning_portfolio_diagnosis():
     try:
         nc   = NewsCollector()
         news = nc.collect_news(max_per_feed=5)
-        news = nc.filter_by_importance(news)
+        try:
+            news = nc.filter_by_importance(news)
+        except Exception:
+            pass  # 필터링 실패 시 원본 뉴스 사용
 
         # 전날 결과 추적
         al.track_results(pf.portfolio)
@@ -1516,7 +1525,7 @@ async def morning_portfolio_diagnosis():
             from modules.market_indicators import MarketIndicators
             from modules.price_collector import PriceCollector
             mr    = MarketRegime()
-            r     = mr.analyze_regime_sync()
+            r     = mr.current_regime  # 저장된 값 즉시 사용 (분석 안 함)
             mi    = MarketIndicators()
             inds  = mi.get_all_indicators()
             pc    = PriceCollector()
@@ -1534,6 +1543,8 @@ async def morning_portfolio_diagnosis():
             # 현재가 수집
             portfolio_prices = {}
             for ticker, stock in pf.portfolio.items():
+                if not isinstance(stock, dict):
+                    continue
                 from modules.kis_api import KISApi
                 kis = KISApi()
                 if stock.get('market') == 'KR':
@@ -1628,7 +1639,7 @@ async def update_event_calendar():
 async def nxt_realtime_scan():
     """NXT 시간 (15:30~20:00) 실시간 감시"""
     try:
-        r           = regime.analyze_regime_sync()
+        r           = regime.current_regime
         regime_type = r.get('regime', '중립')
         params      = regime.get_strategy_params()
 
@@ -1714,7 +1725,10 @@ async def us_market_closing_analysis():
         # 뉴스 + AI 분석
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=3)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
         news_text = "\n".join([f"  {'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:50]}" for n in filtered[:6]])
 
         from anthropic import Anthropic
@@ -1763,7 +1777,10 @@ async def us_pre_trading_briefing():
     try:
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
         macro    = await ma.analyze_macro_context(filtered)
         result   = await sr.analyze_and_recommend(filtered, regime.current_regime.get('regime', '강세'), "20:30", macro)
         msg      = sr.build_message(result, "20:30")
@@ -1829,7 +1846,10 @@ async def nxt_analysis():
         # ② 뉴스
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=3)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
         news_text = "\n".join([
             f"{'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:50]}"
             for n in filtered[:8]
@@ -2037,9 +2057,16 @@ async def highlow_scan():
 
 async def risk_analysis():
     """08:10 포트폴리오 리스크 분석"""
+    if is_weekend():
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] ⚠️ 리스크 분석")
     try:
-        rm.portfolio     = rm._load_portfolio()
+        portfolio = rm._load_portfolio()
+        # portfolio가 딕셔너리인지 확인
+        if not isinstance(portfolio, dict):
+            print(f"  ⚠️ portfolio 데이터 오류: {type(portfolio)}")
+            return
+        rm.portfolio     = portfolio
         sector_ratio, _  = rm.calc_sector_concentration()
         metrics          = rm.calc_risk_metrics()
         fx_data          = rm.calc_exchange_rate_risk()
@@ -2235,7 +2262,10 @@ async def weekend_macro_check():
         # 주말 뉴스 수집
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
         news_text = "\n".join([f"{'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:60]}" for n in filtered[:10]])
  
         # 매크로 데이터
@@ -2292,7 +2322,10 @@ async def weekend_social_collect():
  
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
  
         # StockTwits 주요 종목 소셜 반응
         us_tickers = [t for t, s in pf.portfolio.items() if s.get('market') == 'US']
@@ -2336,7 +2369,10 @@ async def monday_weekly_briefing():
         # 뉴스 수집
         nc       = NewsCollector()
         news     = nc.collect_news(max_per_feed=5)
-        filtered = nc.filter_by_importance(news)
+        try:
+            filtered = nc.filter_by_importance(news)
+        except Exception:
+            filtered = news[:10]  # 필터링 실패 시 원본 사용
         news_text = "\n".join([f"{'🔴' if n.get('importance')=='high' else '🟡'} {n['title'][:60]}" for n in filtered[:10]])
  
         # 레이어 1 섹터 선정
