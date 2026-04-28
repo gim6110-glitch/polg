@@ -220,33 +220,28 @@ class SmartRecommender:
             change = kis_data['change_pct']
             volume = kis_data.get('volume', 0)
 
-            hist = yf.Ticker(f"{ticker}.KS").history(period="60d").dropna()
-            if len(hist) < 20:
+            # KIS 일봉 (yfinance KR 사용 안 함)
+            indicators = self.kis.calc_indicators_kr(ticker, days=80)
+            if not indicators:
                 return None
 
-            close    = hist['Close']
-            vol_hist = hist['Volume']
+            import pandas as pd
+            rows = self.kis.get_kr_ohlcv(ticker, days=80)
+            if not rows or len(rows) < 20:
+                return None
+            df       = pd.DataFrame(rows)
+            close    = df['close'].astype(float)
+            vol_hist = df['volume'].astype(float)
             avg_vol  = vol_hist.mean()
             vol_ratio = round(volume / avg_vol, 1) if avg_vol > 0 else 1
 
-            ma5  = close.rolling(5).mean().iloc[-1]
-            ma20 = close.rolling(20).mean().iloc[-1]
-            ma60 = close.rolling(60).mean().iloc[-1] if len(hist) >= 60 else ma20
-
-            # RSI
-            delta = close.diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rs    = gain / (loss.replace(0, 0.0001))
-            rsi   = round((100 - 100 / (1 + rs)).iloc[-1], 1)
-
-            # OBV
-            obv       = (vol_hist * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
-            obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
-
-            # 52주 고점 대비
-            high_52w = close.max()
-            drawdown = round((price - high_52w) / high_52w * 100, 1)
+            ma5      = indicators['ma5']
+            ma20     = indicators['ma20']
+            ma60     = indicators['ma60']
+            rsi      = indicators['rsi']
+            obv_trend = indicators['obv_trend']
+            drawdown  = indicators['drawdown']
+            high_52w  = indicators['high_52w']
 
             # ── 1) 수급 (가장 선행, 최고 가중) ─────────
             if supply_data:
@@ -385,25 +380,24 @@ class SmartRecommender:
             change = kis_data['change_pct']
             volume = kis_data.get('volume', 0)
 
-            hist = yf.Ticker(f"{ticker}.KS").history(period="60d").dropna()
-            if len(hist) < 10:
+            # KIS 일봉 (yfinance KR 사용 안 함)
+            indicators = self.kis.calc_indicators_kr(ticker, days=80)
+            if not indicators:
                 return None
 
-            close    = hist['Close']
-            vol_hist = hist['Volume']
+            import pandas as pd
+            rows = self.kis.get_kr_ohlcv(ticker, days=80)
+            if not rows or len(rows) < 10:
+                return None
+            df       = pd.DataFrame(rows)
+            vol_hist = df['volume'].astype(float)
             avg_vol  = vol_hist.mean()
             vol_ratio = round(volume / avg_vol, 1) if avg_vol > 0 else 1
 
-            ma5  = close.rolling(5).mean().iloc[-1]
-            ma20 = close.rolling(20).mean().iloc[-1]
-            ma60 = close.rolling(60).mean().iloc[-1] if len(hist) >= 60 else ma20
-
-            # RSI
-            delta = close.diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rs    = gain / (loss.replace(0, 0.0001))
-            rsi   = round((100 - 100 / (1 + rs)).iloc[-1], 1)
+            ma5  = indicators['ma5']
+            ma20 = indicators['ma20']
+            ma60 = indicators['ma60']
+            rsi  = indicators['rsi']
 
             # ── 1) 핵심: 매집 신호 ──────────────────────
             # 거래량 터졌는데 주가 안 오름 = 세력 조용히 매집 중
