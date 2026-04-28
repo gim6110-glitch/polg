@@ -4,6 +4,7 @@ import json
 import asyncio
 import time
 from datetime import datetime, timedelta
+from anomaly_detector import check_anomalies
 
 sys.path.insert(0, '/media/dps/T7/stock_ai')
 from modules.kis_api import KISApi
@@ -449,6 +450,15 @@ class RealtimeMonitor:
         except:
             return {}
 
+    async def run_realtime_monitor(send_func, trigger_regime_func=None):
+        while True:
+            try:
+                await check_anomalies(send_func, trigger_regime_func)
+                # ... 기존 모니터 코드
+            except Exception as e:
+                pass
+            await asyncio.sleep(300)  # 5분
+    
     async def run_forever(self, interval_sec=300):
         self.running = True
         print(f"✅ 실시간 모니터 시작 (매 {interval_sec//60}분)")
