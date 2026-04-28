@@ -136,15 +136,29 @@ class TradeGuard:
 
     # ── 장세 신뢰도 ────────────────────────────────
 
+    # 장세별 신뢰도 임계값
+    # 강세장은 낮게 (기회 손실 방지), 조정장은 높게 (손실 방지)
+    REGIME_THRESHOLD = {
+        "초강세":  35,
+        "강세":    40,
+        "상승가속": 40,
+        "과열경계": 55,
+        "과열":    60,
+        "조정초입": 60,
+        "조정중":  65,
+        "중립":    50,
+        "약세":    65,
+    }
+
     def calc_regime_confidence(self, mt_context):
         """
         market_temperature 결과로 장세 신뢰도 점수 계산
-        60점 미만 → 진입 금지
+        임계값은 장세별로 동적 적용
         """
         if not mt_context:
             return 40, "낮음"
 
-        ai_result  = mt_context.get("ai_result", {})
+        ai_result  = mt_context.get("ai_result", mt_context)
         kr_temp    = mt_context.get("kr_temp", {})
         confidence = ai_result.get("regime_confidence", "낮음")
 
@@ -157,18 +171,38 @@ class TradeGuard:
             score -= 20
         elif vix >= 25:
             score -= 10
+        elif vix <= 15:
+            score += 5  # VIX 낮으면 신뢰도 가산
 
         # 외국인 수급 보정
         foreign_dir  = kr_temp.get("foreign_direction", "불명")
         foreign_cons = kr_temp.get("foreign_consecutive", 0)
         if foreign_dir == "매도" and foreign_cons >= 3:
-            score -= 20
+            score -= 15
         elif foreign_dir == "매도":
-            score -= 10
+            score -= 5
+        elif foreign_dir == "매수" and foreign_cons >= 3:
+            score += 5  # 외국인 연속 매수면 신뢰도 가산
+
+        # 시간대 보정 (데이터 부족 시간대 완화)
+        hour = __import__('datetime').datetime.now().hour
+        if hour < 7 or hour >= 19:
+            score += 10  # 저녁/새벽은 데이터 부족이 정상, 완화
 
         score = max(0, min(100, score))
         level = "높음" if score >= 80 else "보통" if score >= 60 else "낮음"
         return score, level
+
+    def get_regime_threshold(self, mt_context=None):
+        """현재 장세에 맞는 신뢰도 임계값 반환"""
+        try:
+            import json as _json
+            with open('/media/dps/T7/stock_ai/data/dynamic_strategy.json', encoding='utf-8') as f:
+                strategy = _json.load(f)
+            cycle = strategy.get('cycle', '중립')
+        except Exception:
+            cycle = '중립'
+        return self.REGIME_THRESHOLD.get(cycle, 50)
 
     # ── 손실 한도 체크 ─────────────────────────────
 
@@ -472,13 +506,14 @@ class TradeGuard:
         if in_rest:
             blocked.append(f"🛑 휴식 기간: {rest_reason}")
 
-        # 2. 장세 신뢰도
+        # 2. 장세 신뢰도 (장세별 동적 임계값)
         if mt_context:
             score, level = self.calc_regime_confidence(mt_context)
-            if score < 60:
-                blocked.append(f"🛑 장세 신뢰도 부족: {score}점 ({level})")
-            elif score < 70:
-                warnings.append(f"⚠️ 장세 신뢰도 주의: {score}점")
+            threshold    = self.get_regime_threshold(mt_context)
+            if score < threshold:
+                blocked.append(f"🛑 장세 신뢰도 부족: {score}점 (기준:{threshold}점/{level})")
+            elif score < threshold + 10:
+                warnings.append(f"⚠️ 장세 신뢰도 주의: {score}점 (기준:{threshold}점)")
 
         # 3. 손실 한도
         if current_total > 0:
