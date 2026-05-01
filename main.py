@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import json
 import schedule
 import time
 import threading
@@ -40,6 +41,26 @@ from modules.fx_risk_manager import FxRiskManager
 from modules.closing_analyzer import ClosingAnalyzer
 from modules.macro_analyzer import MacroAnalyzer
 from modules.risk_manager import RiskManager
+from modules.theme_hunter import ThemeHunter
+from modules.entry_watcher import EntryWatcher
+from modules.ai_budget import can_call_ai, get_today_usage
+from modules.volume_climax import VolumeClimax
+from modules.prev_day_kr_scanner import PrevDayKRScanner
+from modules.prev_day_us_scanner import PrevDayUSScanner
+from modules.pullback_kr_scanner import PullbackKRScanner
+from modules.pullback_us_scanner import PullbackUSScanner
+from modules.sector_rotation import SectorRotation
+from modules.exit_manager import ExitManager
+from modules.rebound_watchlist import ReboundWatchlist
+from modules.position_manager import PositionManager
+from modules.daily_holding_summary import DailyHoldingSummary
+from modules.earnings_pre_alert import EarningsPreAlert
+from modules.split_entry_tracker import SplitEntryTracker
+
+# 운영 기준 시간대 고정 (KST)
+os.environ.setdefault("TZ", "Asia/Seoul")
+if hasattr(time, "tzset"):
+    time.tzset()
 
 mt = MarketTemperature()
 sr = SmartRecommender()
@@ -60,6 +81,22 @@ fx = FxRiskManager()
 ca = ClosingAnalyzer()
 ma = MacroAnalyzer()
 rm = RiskManager()
+th = ThemeHunter()
+ew = EntryWatcher()
+vc = VolumeClimax()
+pkr = PrevDayKRScanner()
+pus = PrevDayUSScanner()
+pbrk = PullbackKRScanner()
+pusb = PullbackUSScanner()
+srot = SectorRotation()
+exm = ExitManager()
+rbw = ReboundWatchlist()
+posm = PositionManager()
+dhs = DailyHoldingSummary()
+epa = EarningsPreAlert()
+setr = SplitEntryTracker()
+
+REBALANCE_STATE_FILE = "/media/dps/T7/stock_ai/data/rebalance_state.json"
 
 load_dotenv('/media/dps/T7/stock_ai/.env')
 
@@ -159,6 +196,40 @@ async def send(msg):
     except Exception as e:
         print(f"❌ 전송 실패: {e}")
 
+
+def _current_week_key():
+    now = datetime.now()
+    y, w, _ = now.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def _load_rebalance_state():
+    if os.path.exists(REBALANCE_STATE_FILE):
+        try:
+            with open(REBALANCE_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {"week_key": _current_week_key(), "add_buy_counts": {}}
+
+
+def _save_rebalance_state(state):
+    os.makedirs(os.path.dirname(REBALANCE_STATE_FILE), exist_ok=True)
+    with open(REBALANCE_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def _record_add_buy_count(ticker):
+    state = _load_rebalance_state()
+    wk = _current_week_key()
+    if state.get("week_key") != wk:
+        state = {"week_key": wk, "add_buy_counts": {}}
+    counts = state.setdefault("add_buy_counts", {})
+    counts[ticker] = int(counts.get(ticker, 0)) + 1
+    _save_rebalance_state(state)
+
 # ── 명령어 ──
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = """🤖 <b>주식 AI 에이전트 v4.0</b>
@@ -197,11 +268,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /add 종목명 티커 기간
 /remove 종목명
 /gamble — 도박 watchlist
+/gamble scan — 도박 후보 즉시 스캔
 
 ⚙️ <b>시스템</b>
 /backtest — 모의 테스트 승률/수익률
 /loss — 손실 한도 현황
-/status — 시스템 상태"""
+/status — 시스템 상태
+/buy_rate 티커 환율 — 매수환율 보정"""
     await send(msg)
 
 # ③ 30분마다 결과 체크 함수 추가
@@ -242,6 +315,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"  🇰🇷 한국: {port_kr}개\n"
     msg += f"  🇺🇸 미국: {port_us}개\n\n"
     msg += f"⚡ 실시간 모니터: 5분마다 감시 중\n"
+    msg += f"🧠 {get_today_usage()}\n"
+    msg += f"⛔ 손절 블랙리스트: {tg.get_blacklist_status_text()}\n"
+    gate = tg.market_gate
+    gate_txt = "정상" if not gate.get("blocked") else f"{gate.get('scope')} 차단 / {gate.get('reason')}"
+    msg += f"🚧 시장 게이트: {gate_txt}\n"    
     msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     await send(msg)
 
@@ -1216,15 +1294,32 @@ async def cmd_buy(update, context):
         )
         return
 
-    name      = args[0]
-    ticker    = args[1].upper()
-    buy_price = float(args[2].replace(",", ""))
-    quantity  = int(args[3])
+    name   = args[0]
+    ticker = args[1].upper()
+    try:
+        buy_price = float(args[2].replace(",", ""))
+        quantity  = int(args[3])
+    except ValueError:
+        await update.message.reply_text(
+            "❌ 매수가/수량 형식 오류\n"
+            "예) /buy 엔비디아 NVDA 875 3"
+        )
+        return
+
+    if buy_price <= 0 or quantity <= 0:
+        await update.message.reply_text("❌ 매수가와 수량은 0보다 커야 합니다.")
+        return
 
     market = "US" if ticker.isalpha() else "KR"
 
-    pf.add_stock(name, ticker, buy_price, quantity,
-                 market=market, hold_type="장기")
+    ok, result_msg = pf.add_stock(
+        name, ticker, buy_price, quantity,
+        market=market, hold_type="장기", deduct_cash=True
+    )
+    if not ok:
+        await update.message.reply_text(f"❌ 매수 실패: {result_msg}")
+        return
+    _record_add_buy_count(ticker)
 
     # ✅ 미국 주식이면 환율 저장
     if market == "US":
@@ -1232,16 +1327,52 @@ async def cmd_buy(update, context):
 
     total    = buy_price * quantity
     currency = "$" if market == "US" else "₩"
+    cash = pf.get_cash()
+    remain = cash["USD"] if market == "US" else cash["KRW"]
+    remain_currency = "$" if market == "US" else "₩"
 
     await update.message.reply_text(
         f"✅ <b>{name}</b> 매수 등록 완료\n\n"
         f"💰 매수가: {currency}{buy_price:,}\n"
         f"📦 수량: {quantity}주\n"
         f"💵 총액: {currency}{total:,.0f}\n"
+        f"{result_msg}\n"
+        f"💳 잔여 예수금: {remain_currency}{remain:,.2f}\n"
         f"📋 유형: {market} 장기",
         parse_mode="HTML"
     )
 
+async def cmd_watch(update, context):
+    args = context.args
+    if len(args) < 3:
+        await update.message.reply_text("사용법: /watch 티커 목표가 손절가 [분할비율]\n예) /watch NVDA 115 108 50/30/20")
+        return
+    ticker = args[0].upper()
+    try:
+        target = float(args[1].replace(",", ""))
+        stop = float(args[2].replace(",", ""))
+    except ValueError:
+        await update.message.reply_text("❌ 목표가/손절가 숫자 형식 오류")
+        return
+    split = args[3] if len(args) >= 4 else "50/30/20"
+    ew.register(ticker, target, stop, split=split)
+    await update.message.reply_text(f"✅ Watch 등록: {ticker} 목표 {target} / 손절 {stop} / 분할 {split}")
+
+async def cmd_watchlist(update, context):
+    await update.message.reply_text(ew.get_watchlist_text(), parse_mode="HTML")
+
+async def cmd_unwatch(update, context):
+    if not context.args:
+        await update.message.reply_text("사용법: /unwatch 티커\n예) /unwatch NVDA")
+        return
+    ticker = context.args[0].upper()
+    ok = ew.unregister(ticker)
+    if ok:
+        ew._save()
+        await update.message.reply_text(f"✅ {ticker} watch 해제 완료")
+    else:
+        await update.message.reply_text(f"ℹ️ {ticker} watch 목록에 없음")
+        
 async def cmd_buy_rate(update, context):
     """
     /buy_rate TICKER 환율
@@ -1272,27 +1403,32 @@ async def cmd_sell(update, context):
     args = context.args
     if len(args) < 2:
         await update.message.reply_text(
-            "사용법: /sell 티커 매도가\n"
+            "사용법: /sell 티커 매도가 [수량]\n"
             "예) /sell NVDA 900\n"
-            "예) /sell 005930 220000"
+            "예) /sell 005930 220000\n"
+            "예) /sell NVDA 900 2"
         )
         return
     ticker    = args[0].upper()
     sell_price = float(args[1].replace(",", ""))
-    name      = pf.remove_stock(ticker, sell_price)
-    if name:
-        stock_info = None
-        for t, s in list(pf.portfolio.items()):
-            if t == ticker:
-                stock_info = s
-                break
+    qty = int(args[2]) if len(args) >= 3 else None
+    ok, msg, profit_pct = pf.remove_stock(ticker, sell_price, qty)
+    if ok:
+        try:
+            tg.record_trade_result(ticker, profit_pct)
+        except Exception:
+            pass
+        market = "US" if ticker.isalpha() else "KR"
+        cash = pf.get_cash()
+        remain = cash["USD"] if market == "US" else cash["KRW"]
+        remain_currency = "$" if market == "US" else "₩"
         await update.message.reply_text(
-            f"✅ <b>{name}</b> 매도 완료\n"
-            f"💰 매도가: {sell_price:,}",
+            f"{msg}\n"
+            f"💳 잔여 예수금: {remain_currency}{remain:,.2f}",
             parse_mode="HTML"
         )
     else:
-        await update.message.reply_text(f"❌ {ticker} 포트폴리오에 없음")
+        await update.message.reply_text(f"❌ {msg}")
 
 async def cmd_loss(update, context):
     """/loss — 손실 한도 현황"""
@@ -1600,6 +1736,11 @@ async def short_term_recommendation():
     """07:30 장전 단기 추천 → NXT 08:00 진입용"""
     if is_weekend():
         return
+    if not await check_market_gate():
+        return
+    if not can_call_ai("07:30단기"):
+        await send(f"⚠️ AI 호출 예산 소진으로 07:30 추천 스킵\n{get_today_usage()}")
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🟡 07:30 단기 추천 시작")
     try:
         # 레이어 1: 시장 온도 + 섹터 선정
@@ -1617,9 +1758,8 @@ async def short_term_recommendation():
         total, _ = tg.get_total_assets(pf.portfolio)
         is_blocked, blocked, warnings = tg.full_check(context, total)
         if is_blocked:
-            guard_msg = tg.build_guard_message(is_blocked, blocked, warnings)
-            await send(guard_msg)
-            return
+            guard_msg = tg.build_guard_message(False, [], blocked + warnings)
+            await send("ℹ️ [참고] 손실/게이트 경고 감지 (추천은 계속 진행)\n" + guard_msg)
         elif warnings:
             guard_msg = tg.build_guard_message(False, [], warnings)
             await send(guard_msg)
@@ -1644,6 +1784,11 @@ async def short_term_recommendation():
 async def afternoon_recommendation():
     """14:30 내일 선점 추천 → NXT/장후 진입용"""
     if is_weekend():
+        return
+    if not await check_market_gate():
+        return
+    if not can_call_ai("14:30선점"):
+        await send(f"⚠️ AI 호출 예산 소진으로 14:30 추천 스킵\n{get_today_usage()}")
         return
     print(f"[{datetime.now().strftime('%H:%M')}] 🕑 14:30 선점 추천 시작")
     try:
@@ -1676,29 +1821,38 @@ async def nxt_closing_summary():
         return
     print(f"[{datetime.now().strftime('%H:%M')}] \U0001f306 NXT \ub9c8\uac10 \uc694\uc57d")
     try:
-        from modules.premarket_futures import PremarketFutures
+        rows = th.kis.get_top_fluctuation(market="J", count=50)
+        now = datetime.now()
+        msg = "🌆 <b>NXT 마감 요약</b> " + now.strftime("%m/%d %H:%M") + "\n\n"
 
-        pf_nxt   = PremarketFutures()
-        analysis = await pf_nxt.analyze_kr_nxt()
-        hot  = [(n, d) for n, d in analysis.get('hot_sectors', []) if d['avg_change'] >= 1]
-        down = [(n, d) for n, d in analysis.get('hot_sectors', []) if d['avg_change'] <= -1]
-        now  = datetime.now()
-        msg  = "\U0001f306 <b>NXT \ub9c8\uac10 \uc694\uc57d</b> " + now.strftime("%m/%d %H:%M") + "\n\n"
-        if hot:
-            msg += "\U0001f4c8 <b>NXT \uac15\uc138 \uc139\ud130</b>\n"
-            for name, data in hot[:3]:
-                leaders = " / ".join([f"{l['name']} {l['change']:+.1f}%" for l in data['leaders'][:2]])
-                msg += f"  {name}: {data['avg_change']:+.1f}% ({leaders})\n"
-        if down:
-            msg += "\n\U0001f4c9 <b>NXT \uc57d\uc138 \uc139\ud130</b>\n"
-            for name, data in down[:3]:
-                leaders = " / ".join([f"{l['name']} {l['change']:+.1f}%" for l in data['leaders'][:2]])
-                msg += f"  {name}: {data['avg_change']:+.1f}% ({leaders})\n"
-        if analysis.get('recommendations'):
-            msg += "\n\U0001f3af <b>\ub0b4\uc77c \uc8fc\ubaa9 \uc885\ubaa9</b>\n"
-            for r in analysis['recommendations'][:3]:
-                msg += f"  {r['name']} ({r['ticker']}): {r['reason']}\n"
-        msg += "\n\u23f0 " + now.strftime("%Y-%m-%d %H:%M")
+        if not rows:
+            await send(msg + "데이터 없음")
+            return
+
+        # 1) NXT 등락률 상위 (sector_db 미등록 종목도 그대로 노출)
+        msg += "📈 <b>NXT 등락률 상위</b>\n"
+        for r in rows[:8]:
+            msg += f"  {r['name']} {r['change_pct']:+.2f}% ({r['price']:,})\n"
+
+        # 2) 테마 동반 급등 묶음
+        fired = th._group_theme_hits(rows)
+        if fired:
+            msg += "\n🔥 <b>강세 테마</b>\n"
+            for theme, data in list(fired.items())[:4]:
+                leaders = "+".join([x["name"] for x in data["leaders"][:3]])
+                msg += f"  {theme}: {leaders} 동반 급등\n"
+
+        # 3) 내일 NXT 선점 후보
+        preempt_lines = []
+        for theme, data in fired.items():
+            for laggard in data.get("laggards", [])[:2]:
+                preempt_lines.append((theme, laggard))
+        if preempt_lines:
+            msg += "\n🎯 <b>내일 NXT 선점 후보</b>\n"
+            for theme, laggard in preempt_lines[:5]:
+                msg += f"  [{theme}] {laggard['name']} 오늘 {laggard['change_pct']:+.2f}%\n"
+
+        msg += "\n⏰ " + now.strftime("%Y-%m-%d %H:%M")
         await send(msg)
         print("  \u2705 NXT \ub9c8\uac10 \uc694\uc57d \uc644\ub8cc")
     except Exception as e:
@@ -1730,6 +1884,240 @@ async def closing_summary():
         print("  ✅ 마감 분석 + 내일 추천 완료")
     except Exception as e:
         print(f"  ❌ 마감 분석 실패: {e}")
+
+
+async def portfolio_rebalance_signal():
+    """15:45 포트폴리오 실행 시그널(익절/정리/신규진입 후보)"""
+    if is_weekend():
+        return
+    try:
+        results, total_inv, total_cur, total_profit, total_profit_pct = pf.get_portfolio_status()
+        cash = pf.get_cash()
+        krw_cash = cash.get("KRW", 0)
+        usd_cash = cash.get("USD", 0)
+
+        core_compounders = {"NVDA", "MSFT", "GOOGL", "AVGO", "VST", "NEE"}
+        option_tickers = {"IONQ", "RKLB", "OKLO", "RXRX", "RGTI", "ASTS", "APLD", "AMPX"}
+        cycle_stage = regime.current_regime.get("cycle_stage", "상승중")
+        target_by_stage = {
+            "초입":     {"코어": (0.40, 0.50), "성장": (0.30, 0.40), "옵션": (0.10, 0.20)},
+            "상승중":   {"코어": (0.40, 0.50), "성장": (0.30, 0.40), "옵션": (0.10, 0.20)},
+            "가속":     {"코어": (0.35, 0.45), "성장": (0.35, 0.45), "옵션": (0.10, 0.18)},
+            "과열경계": {"코어": (0.45, 0.60), "성장": (0.25, 0.35), "옵션": (0.05, 0.12)},
+            "과열":     {"코어": (0.50, 0.65), "성장": (0.20, 0.30), "옵션": (0.03, 0.08)},
+            "조정초입": {"코어": (0.50, 0.65), "성장": (0.20, 0.30), "옵션": (0.03, 0.08)},
+            "조정중":   {"코어": (0.55, 0.70), "성장": (0.15, 0.25), "옵션": (0.00, 0.05)},
+            "약세":     {"코어": (0.60, 0.75), "성장": (0.10, 0.20), "옵션": (0.00, 0.03)},
+            "중립":     {"코어": (0.45, 0.55), "성장": (0.25, 0.35), "옵션": (0.05, 0.12)},
+        }
+        bucket_target = target_by_stage.get(cycle_stage, target_by_stage["중립"])
+        # 변동성/조정확률 보정: 옵션 비중 상한 자동 조절
+        correction_prob = float(regime.current_regime.get("correction_prob", 30) or 30)
+        bucket_target = dict(bucket_target)
+        if correction_prob >= 60:
+            core_lo, core_hi = bucket_target["코어"]
+            op_lo, op_hi = bucket_target["옵션"]
+            bucket_target["코어"] = (min(0.80, core_lo + 0.05), min(0.85, core_hi + 0.05))
+            bucket_target["옵션"] = (max(0.00, op_lo - 0.02), max(0.03, op_hi - 0.05))
+            vol_mode = "방어(옵션축소)"
+        elif correction_prob <= 35:
+            core_lo, core_hi = bucket_target["코어"]
+            op_lo, op_hi = bucket_target["옵션"]
+            bucket_target["코어"] = (max(0.30, core_lo - 0.03), max(0.35, core_hi - 0.03))
+            bucket_target["옵션"] = (min(0.20, op_lo + 0.01), min(0.25, op_hi + 0.03))
+            vol_mode = "공격(옵션확대)"
+        else:
+            vol_mode = "중립"
+        bucket_value = {"코어": 0.0, "성장": 0.0, "옵션": 0.0}
+        take_profit = []
+        cleanup = []
+        hold = []
+        long_hold = []
+        add_weight = []
+        for r in results:
+            t1 = r.get("target1")
+            t2 = r.get("target2")
+            cp = r.get("current_price")
+            exit_t = r.get("exit_target")
+            hold_type = r.get("hold_type", "")
+            ticker = r.get("ticker", "")
+            profit_pct = r.get("profit_pct", 0)
+            curr_val = r.get("current_val_krw", r.get("current_val", 0))
+            if ticker in core_compounders:
+                bucket_value["코어"] += curr_val
+            elif ticker in option_tickers or hold_type == "도박":
+                bucket_value["옵션"] += curr_val
+            else:
+                bucket_value["성장"] += curr_val
+
+            # 초장기 복리 후보: 코어 컴파운더 + 중장기 + 2차 목표 전
+            if ticker in core_compounders and hold_type == "중장기" and cp and t2 and cp < t2:
+                long_hold.append(r)
+
+            # 비중 확대 후보: 손익이 과열/붕괴 아닌 구간(-5%~+12%), 목표1 미도달
+            if hold_type == "중장기" and cp and t1 and cp < t1 and -5 <= profit_pct <= 12:
+                add_weight.append(r)
+
+            if cp and t1 and cp >= t1:
+                take_profit.append(r)
+            elif hold_type == "정리대상" and cp and exit_t and cp >= exit_t * 0.95:
+                cleanup.append(r)
+            elif profit_pct >= 20 and ticker not in core_compounders:
+                take_profit.append(r)
+            else:
+                hold.append(r)
+
+        # 신규진입 후보: 금일 테마 상위 + 아직 덜 오른 종목
+        buy_candidates = []
+        rows = th.kis.get_top_fluctuation(market="J", count=30)
+        fired = th._group_theme_hits(rows) if rows else {}
+        for theme, data in fired.items():
+            for laggard in data.get("laggards", [])[:2]:
+                buy_candidates.append((theme, laggard))
+
+        # 급변장 전술 슬롯: 고변동 구간에서도 강한 모멘텀만 소액 추적
+        tactical_kr = [r for r in rows[:20] if r.get("change_pct", 0) >= 20] if rows else []
+        us_watch = ["NVDA", "AVGO", "MSFT", "GOOGL", "IONQ", "RKLB", "OKLO", "RXRX"]
+        tactical_us = []
+        for t in us_watch:
+            us_data = th.kis.get_us_price(t, "NAS")
+            if us_data and us_data.get("change_pct", 0) >= 8:
+                tactical_us.append(us_data)
+
+        # 차트 흐름 전환: 대장주 둔화 + 2등주 거래량 급증 태그
+        rotation_tags = []
+        for theme, data in fired.items():
+            leaders = data.get("leaders", [])
+            laggards = data.get("laggards", [])
+            leader_slow = any(l.get("change_pct", 0) <= 6 for l in leaders[:2])
+            laggard_surge = any((x.get("change_pct", 0) >= 3 and x.get("volume", 0) >= 300000) for x in laggards[:3])
+            if leader_slow and laggard_surge:
+                rotation_tags.append(theme)
+
+        # 이벤트 캘린더 민감도(오늘/내일)
+        today_events = ec.get_today_events()
+        tomorrow_events = ec.get_tomorrow_events()
+        sev_map = {"high": "상", "medium": "중", "low": "하"}
+        event_lines = []
+        reduce_guide = ""
+        for ev in (today_events + tomorrow_events)[:4]:
+            sev = sev_map.get(ev.get("severity", "low"), "하")
+            event_lines.append(f"- {ev.get('type')} 중요도:{sev} | {ev.get('action')}")
+            if ev.get("severity") == "high":
+                reduce_guide = "고위험 이벤트 구간: 신규진입 축소(기존의 50% 이내), 옵션 비중 즉시 점검"
+
+        msg = [f"📌 <b>포트폴리오 실행 시그널</b> {datetime.now().strftime('%m/%d %H:%M')}"]
+        msg.append(f"총수익률: {total_profit_pct:+.2f}% | KRW예수금: ₩{krw_cash:,.0f} | USD예수금: ${usd_cash:,.2f}")
+        if event_lines:
+            msg.append("\n📅 이벤트 민감도(오늘/내일):")
+            msg.extend(event_lines)
+            if reduce_guide:
+                msg.append(f"⚠️ {reduce_guide}")
+
+        # 버킷 목표 대비 초과/미달
+        total_bucket = sum(bucket_value.values()) if sum(bucket_value.values()) > 0 else 1
+        msg.append(f"\n🎯 버킷 비중 점검 (장세:{cycle_stage}, 변동성모드:{vol_mode}, 조정확률:{correction_prob:.0f}%):")
+        for b in ["코어", "성장", "옵션"]:
+            ratio = bucket_value[b] / total_bucket
+            lo, hi = bucket_target[b]
+            if ratio < lo:
+                status = f"미달 {((lo-ratio)*100):.1f}%p"
+            elif ratio > hi:
+                status = f"초과 {((ratio-hi)*100):.1f}%p"
+            else:
+                status = "적정"
+            msg.append(f"- {b}: {ratio*100:.1f}% ({status})")
+
+        # 이번 주 추가매수 허용 예산 (과열 방지: 총자산의 8% 한도)
+        week_budget_krw = max(0, (total_cur + krw_cash) * 0.08)
+        state = _load_rebalance_state()
+        if state.get("week_key") != _current_week_key():
+            state = {"week_key": _current_week_key(), "add_buy_counts": {}}
+        add_counts = state.get("add_buy_counts", {})
+        msg.append(f"\n💸 이번 주 추가매수 허용 예산: 약 ₩{week_budget_krw:,.0f}")
+
+        # 실행 우선순위(요약형)
+        execution = []
+        for r in cleanup:
+            execution.append((1, f"정리 {r['ticker']}"))
+        for r in take_profit:
+            execution.append((2, f"익절 {r['ticker']}"))
+        for r in add_weight:
+            cnt = int(add_counts.get(r["ticker"], 0))
+            if cnt < 2:
+                execution.append((3, f"추가 {r['ticker']}"))
+        execution.sort(key=lambda x: x[0])
+        if execution:
+            top_exec = ", ".join([e[1] for e in execution[:5]])
+            msg.append(f"\n🚦 실행우선순위: {top_exec}")
+
+        if take_profit:
+            msg.append("\n✅ 익절 고려:")
+            for r in take_profit[:4]:
+                msg.append(f"- {r['name']}({r['ticker']}) {r['profit_pct']:+.1f}%")
+        if cleanup:
+            msg.append("\n⚠️ 정리대상 실행:")
+            for r in cleanup[:3]:
+                msg.append(f"- {r['name']}({r['ticker']}) 현재가 {r.get('current_price', 0):,.0f}")
+        if buy_candidates and (krw_cash > 1000000 or usd_cash > 500):
+            msg.append("\n🆕 신규진입 관찰:")
+            for theme, laggard in buy_candidates[:4]:
+                msg.append(f"- [{theme}] {laggard['name']} {laggard['change_pct']:+.2f}%")
+        # 급변장에서도 초강한 종목 전술추적 (자동매매 X, 소액)
+        if correction_prob >= 60 and (tactical_kr or tactical_us):
+            msg.append("\n⚡ 급변장 전술 슬롯(소액):")
+            if tactical_kr:
+                for r in tactical_kr[:2]:
+                    msg.append(f"- KR {r['name']} {r['change_pct']:+.2f}% (총자산 0.5~1.0% 이내)")
+            if tactical_us:
+                for r in tactical_us[:2]:
+                    msg.append(f"- US {r['ticker']} {r['change_pct']:+.2f}% (총자산 0.5~1.0% 이내)")
+            msg.append("※ 급변장 전술 슬롯 합계 최대 2% (코어/현금 규칙 우선)")
+        if rotation_tags:
+            msg.append("\n🔁 전이신호 태그:")
+            for t in rotation_tags[:3]:
+                msg.append(f"- {t}: 대장주 둔화 + 2등주 거래대금 증가")
+        if long_hold:
+            msg.append("\n🧠 초장기 유지(복리 후보):")
+            for r in long_hold[:4]:
+                msg.append(f"- {r['name']}({r['ticker']}) 목표2 전까지 추세보유")
+        if add_weight and (krw_cash > 1500000 or usd_cash > 1000):
+            msg.append("\n📈 비중 확대 관찰:")
+            shown = 0
+            for r in add_weight:
+                cnt = int(add_counts.get(r["ticker"], 0))
+                if cnt >= 2:
+                    continue
+                cap_note = f"이번주 추가매수 {cnt}/2회"
+                msg.append(f"- {r['name']}({r['ticker']}) 손익 {r['profit_pct']:+.1f}% ({cap_note})")
+                shown += 1
+                if shown >= 3:
+                    break
+        if not take_profit and not cleanup and not buy_candidates and not long_hold and not add_weight:
+            msg.append("\n관망: 현재 포지션 유지")
+
+        # 행동 템플릿(이벤트 전/당일/후)
+        has_today_high = any(e.get("severity") == "high" for e in today_events)
+        has_tomorrow_high = any(e.get("severity") == "high" for e in tomorrow_events)
+        if has_tomorrow_high and not has_today_high:
+            msg.append("\n📘 템플릿(이벤트 전): 관망 50% / 분할진입 30% / 현금확보 20%")
+        elif has_today_high:
+            msg.append("\n📕 템플릿(이벤트 당일): 신규관망 / 수익종목 일부정리 / 옵션비중 축소")
+        else:
+            msg.append("\n📗 템플릿(이벤트 후): 리더확인 후 분할진입 / 2등주 전이 추적")
+
+        final_msg = "\n".join(msg)
+        # 텔레그램 메시지 길이 방지: 핵심 섹션 우선 유지하고 축약
+        if len(final_msg) > 3200:
+            compact = [msg[0], msg[1]]
+            for line in msg[2:]:
+                if line.startswith("🚦") or line.startswith("✅") or line.startswith("⚠️") or line.startswith("💸"):
+                    compact.append(line)
+            compact.append("\n(상세 생략: /portfolio 로 확인)")
+            final_msg = "\n".join(compact)
+        await send(final_msg)
+    except Exception as e:
+        print(f"  ❌ 포트폴리오 실행 시그널 실패: {e}")
 
 async def closing_summary_old():
     print(f"[{datetime.now().strftime('%H:%M')}] 📋 마감")
@@ -2791,10 +3179,106 @@ async def market_regime_analysis():
     except Exception as e:
         print(f"  ❌ 07:00 장세 분석 실패: {e}")
 
+MARKET_GATE = {"blocked": False, "reason": "", "unblock_at": None, "ai_eval_key": ""}
+LOSS_ALERT_STATE = {"date": "", "sent": False}
+
+async def daily_loss_limit_notice():
+    """일간 손실 한도 경고: 하루 1회(아침) 통합 알림"""
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if LOSS_ALERT_STATE.get("date") != today:
+            LOSS_ALERT_STATE["date"] = today
+            LOSS_ALERT_STATE["sent"] = False
+        if LOSS_ALERT_STATE.get("sent"):
+            return
+
+        total, _ = tg.get_total_assets(pf.portfolio)
+        violations = tg.check_loss_limits(total)
+        if not violations:
+            return
+
+        msg = "🛑 <b>일간 손실 한도 경고 (KR/US 통합)</b>\n\n"
+        for v in violations:
+            if v.get("type") == "일간":
+                msg += f"• {v['type']} 손실 {v['actual']:+.1f}% (한도 {v['limit']}%)\n"
+                msg += f"  ↳ {v['action']}\n"
+        msg += "\nℹ️ 알림 전용: 분석/추천은 정상 진행"
+        await send(msg)
+        LOSS_ALERT_STATE["sent"] = True
+    except Exception as e:
+        print(f"  ❌ 일간 손실 한도 알림 실패: {e}")
+
+async def check_market_gate():
+    """추천/스캔 실행 전 공통 게이트"""
+    try:
+        import yfinance as yf
+        vix_hist = yf.Ticker("^VIX").history(period="2d").dropna()
+        vix = float(vix_hist["Close"].iloc[-1]) if not vix_hist.empty else 20.0
+    except Exception:
+        vix = 20.0
+    try:
+        import yfinance as yf
+        sp = yf.Ticker("^GSPC").history(period="2d").dropna()
+        if len(sp) >= 2:
+            sp500_change = ((sp["Close"].iloc[-1] - sp["Close"].iloc[-2]) / sp["Close"].iloc[-2]) * 100
+        else:
+            sp500_change = 0.0
+    except Exception:
+        sp500_change = 0.0
+    try:
+        prices = PriceCollector().get_all_prices()
+        kospi = prices.get("지수", {}).get("코스피", {})
+        kospi_change = float(kospi.get("change_pct", 0))
+    except Exception:
+        kospi_change = 0.0
+
+    state = tg.evaluate_global_market_gate(kospi_change=kospi_change, sp500_change=sp500_change, vix=vix)
+    if state.get("blocked"):
+        gate_key = f"{state.get('scope')}|{state.get('reason')}|{state.get('until')}"
+        if MARKET_GATE.get("reason") != gate_key:
+            MARKET_GATE["reason"] = gate_key
+            until = state.get("until")
+            tail = f"\n해제 예정: {until}" if until else "\n해제 조건: 수동 판단"
+            await send(f"⛔ <b>진입 보류 게이트</b>\n범위: {state.get('scope','ALL')}\n사유: {state.get('reason','')}{tail}")
+        # 패닉 오버슈팅 완화: 급락 구간에서 AI 1회 판단
+        severe = (kospi_change <= -3.0) or (sp500_change <= -2.5)
+        ai_key = f"{datetime.now().strftime('%Y-%m-%d')}|{state.get('scope')}|{int(severe)}"
+        if severe and MARKET_GATE.get("ai_eval_key") != ai_key and can_call_ai("market_gate_ai"):
+            MARKET_GATE["ai_eval_key"] = ai_key
+            try:
+                prompt = (
+                    f"시장 급락 상황 판단: VIX {vix:.1f}, KOSPI {kospi_change:+.2f}%, S&P500 {sp500_change:+.2f}%.\n"
+                    "국내 펀더멘털 훼손이 아닌 과민반응이면 RELAX, 구조적 하락이면 HOLD만 답하세요."
+                )
+                resp = ai.client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=30,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = (resp.content[0].text or "").upper()
+                if "RELAX" in text and "HOLD" not in text:
+                    await send("🟡 <b>패닉 오버슈팅 완화</b>\nAI 판단: 과민반응 가능성.\n현금 비중의 20%만 분할 진입 허용(최종 수동 판단).")
+                    return True
+                await send("🔒 <b>게이트 유지</b>\nAI 판단: 구조적 하락 가능성. 현금 비중 유지 권고.")
+            except Exception:
+                pass
+        # 게이트는 경고성 알림으로만 사용하고 추천/분석은 계속 진행
+        return True
+
+    if MARKET_GATE.get("reason"):
+        MARKET_GATE["reason"] = ""
+        await send("✅ 시장 게이트 해제: 추천 재개")
+    return True
+
 
 async def conviction_recommend():
     """09:40 확신 추천 — NXT + 정규장 초반 방향 확인 후"""
     if is_weekend():
+        return
+    if not await check_market_gate():
+        return
+    if not can_call_ai("09:40확신"):
+        await send(f"⚠️ AI 호출 예산 소진으로 09:40 추천 스킵\n{get_today_usage()}")
         return
     print(f"[{datetime.now().strftime('%H:%M')}] 🎯 09:40 확신 추천 시작")
     try:
@@ -2812,9 +3296,8 @@ async def conviction_recommend():
         total, _ = tg.get_total_assets(pf.portfolio)
         is_blocked, blocked, warnings = tg.full_check(context, total)
         if is_blocked:
-            guard_msg = tg.build_guard_message(is_blocked, blocked, warnings)
-            await send(guard_msg)
-            return
+            guard_msg = tg.build_guard_message(False, [], blocked + warnings)
+            await send("ℹ️ [참고] 손실/게이트 경고 감지 (추천은 계속 진행)\n" + guard_msg)
 
         # 확신 추천: recommend_conviction (임계값 +1 엄격 적용)
         sector_names = mt.get_selected_sector_names()
@@ -2835,9 +3318,56 @@ async def conviction_recommend():
         print(f"  ❌ 09:40 확신 추천 실패: {e}")
 
 
+async def theme_scan_morning_surge():
+    if is_weekend():
+        return
+    await th.scan_morning_surge(send)
+
+
+async def theme_scan_pullback():
+    if is_weekend():
+        return
+    await th.scan_pullback(send)
+
+
+async def theme_scan_afternoon_surge():
+    if is_weekend():
+        return
+    await th.scan_afternoon_surge(send)
+
+
+async def theme_scan_nxt_preempt():
+    if is_weekend():
+        return
+    await th.scan_nxt_preempt(send)
+
+
+async def theme_scan_us_etf_surge():
+    if is_weekend():
+        return
+    await th.scan_us_etf_surge(send)
+
+
+async def theme_scan_earnings_preview():
+    if is_weekend():
+        return
+    await th.scan_earnings_preview(send)
+
+
+async def theme_scan_us_top_movers():
+    if is_weekend():
+        return
+    await th.scan_us_top_movers(send)
+
+
 async def afternoon_nxt_recommend():
     """16:30 오후 NXT — 내일 오를 종목 저점 포착"""
     if is_weekend():
+        return
+    if not await check_market_gate():
+        return
+    if not can_call_ai("16:30NXT선점"):
+        await send(f"⚠️ AI 호출 예산 소진으로 16:30 추천 스킵\n{get_today_usage()}")
         return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌆 16:30 오후 NXT 선점 시작")
     try:
@@ -2870,6 +3400,9 @@ async def us_short_term_recommend():
     """23:30 미국 단기 추천 — 초반 방향 확인 후 (기존 대형주 저점과 별개)"""
     if is_weekend():
         return
+    if not can_call_ai("23:30US단기"):
+        await send(f"⚠️ AI 호출 예산 소진으로 23:30 US 추천 스킵\n{get_today_usage()}")
+        return
     print(f"[{datetime.now().strftime('%H:%M')}] 🌙 23:30 미국 단기 추천 시작")
     try:
         r = regime.current_regime
@@ -2888,7 +3421,23 @@ async def us_short_term_recommend():
             "23:30단기",
             macro
         )
+        if not result or not result.get("recommendations"):
+            fallback = "📊 [23:30 미국 단기] 추천 후보 없음 → 관망"
+            if macro.get('us_strategy'):
+                fallback += f"\n🇺🇸 {macro.get('us_strategy', '')}"
+            await send(fallback)
+            print("  ⚠️ 23:30 미국 단기 추천 결과 없음(관망)")
+            return
+
         msg       = sr.build_message(result, "23:30단기")
+        if "❌ 추천 분석 실패" in msg:
+            fallback = "📊 [23:30 미국 단기] 추천 메시지 생성 실패 → 관망"
+            if macro.get('us_strategy'):
+                fallback += f"\n🇺🇸 {macro.get('us_strategy', '')}"
+            await send(fallback)
+            print("  ⚠️ 23:30 미국 단기 메시지 생성 실패(관망)")
+            return
+
         header    = f"🌙 <b>23:30 미국 단기 추천</b> (개장 초반 방향 확인)\n\n"
         full_msg  = header
         if macro.get('us_strategy'):
@@ -2898,6 +3447,181 @@ async def us_short_term_recommend():
         print("  ✅ 23:30 미국 단기 추천 완료")
     except Exception as e:
         print(f"  ❌ 23:30 미국 단기 추천 실패: {e}")
+
+async def entry_watch_check():
+    try:
+        await ew.check_all(send)
+    except Exception as e:
+        print(f"  ❌ entry watch 체크 실패: {e}")
+
+DART_EVENT_KEYWORDS = {
+    "수주": 30, "계약": 25, "공급": 20, "FDA": 40, "임상": 15, "인허가": 35, "대주주 매수": 30
+}
+
+async def dart_event_driven_scan():
+    """1시간 내 중요 이벤트형 공시 선점 감지"""
+    try:
+        rows = dm.get_today_all_disclosures()
+        if not rows:
+            return
+        kis = __import__("modules.kis_api", fromlist=["KISApi"]).KISApi()
+        for d in rows[:40]:
+            title = d.get("report_nm", "")
+            score = sum(v for k, v in DART_EVENT_KEYWORDS.items() if k in title)
+            if score < 25:
+                continue
+            ticker = d.get("stock_code", "")
+            if not ticker:
+                continue
+            p = kis.get_kr_price(ticker) or {}
+            change = float(p.get("change_pct", 0) or 0)
+            if change < 5:
+                await send(
+                    f"🚨 <b>이벤트 드리븐 선점</b>\n"
+                    f"{d.get('corp_name','')} ({ticker})\n"
+                    f"{title}\n현재 반응: {change:+.1f}% | 점수:{score}"
+                )
+    except Exception as e:
+        print(f"  ❌ 이벤트 드리븐 스캔 실패: {e}")
+
+async def kr_stabilization_check_1430():
+    r = tg.check_kr_stabilization_1430()
+    if not r:
+        return
+    if r["stable"]:
+        await send(f"✅ KR 14:30 안정화 확인 (13:00대비 {r['extra_drop']:+.2f}%)\n단기 반등 후보 제한적 검토 가능")
+    else:
+        await send(f"⛔ KR 14:30 안정화 미확인 (추가하락 {r['extra_drop']:+.2f}%)\n진입 보류 유지")
+
+async def us_stabilization_check_2300():
+    r = tg.check_us_stabilization_2300()
+    if not r:
+        return
+    if r["stable"]:
+        await send(f"✅ US 23:00 안정화 확인 (21:30대비 {r['extra_drop']:+.2f}%)\n미국 단기 반등 후보 검토 가능")
+    else:
+        await send(f"⛔ US 23:00 안정화 미확인 (추가하락 {r['extra_drop']:+.2f}%)\n진입 보류 유지")
+
+async def volume_climax_holdings_check():
+    """30분마다 보유종목 볼륨 클라이맥스 청산/진입 신호 체크 (게이트 무관)"""
+    try:
+        tickers = [t for t, s in pf.portfolio.items() if isinstance(s, dict)]
+        rows = vc.scan_holdings(tickers)
+        for r in rows:
+            label = "🚨 긴급 청산 경고" if r["clear"] else "🔥 세력 진입 감지"
+            await send(
+                f"{label}\n"
+                f"{r['ticker']} | 거래량 {r['vol_ratio']:.1f}배 | 등락률 {r['change']:+.1f}%\n"
+                f"고점대비 {r['drop_from_high']:+.1f}% | 종가/고가 {r['close_vs_high']:.1f}%"
+            )
+    except Exception as e:
+        print(f"  ❌ volume climax 체크 실패: {e}")
+
+async def prev_day_kr_scan():
+    try:
+        msg = pkr.scan()
+        if msg:
+            await send(msg)
+    except Exception as e:
+        print(f"  ❌ KR 전날 선점 스캔 실패: {e}")
+
+async def prev_day_us_scan():
+    try:
+        msg = pus.scan()
+        if msg:
+            await send(msg)
+    except Exception as e:
+        print(f"  ❌ US 전날 선점 스캔 실패: {e}")
+
+async def pullback_kr_scan():
+    try:
+        rows = __import__("modules.kis_api", fromlist=["KISApi"]).KISApi().get_top_fluctuation("KR") or []
+        msg = pbrk.scan(rows)
+        if msg:
+            await send(msg)
+    except Exception as e:
+        print(f"  ❌ KR 눌림목 스캔 실패: {e}")
+
+async def pullback_us_scan():
+    try:
+        msg = pusb.scan()
+        if msg:
+            await send(msg)
+    except Exception as e:
+        print(f"  ❌ US 눌림목 스캔 실패: {e}")
+
+async def sector_rotation_weekly():
+    try:
+        nc = NewsCollector()
+        news = nc.collect_news(max_per_feed=5)
+        hot, results = await srot.get_today_targets(news, market="KR")
+        msg = srot.build_alert_message(hot, results, market="KR")
+        await send(msg)
+    except Exception as e:
+        print(f"  ❌ 섹터 로테이션 실패: {e}")
+
+async def position_manager_daily():
+    try:
+        await send(posm.build_message(pf.portfolio))
+    except Exception as e:
+        print(f"  ❌ 비중 분석 실패: {e}")
+
+async def daily_holding_summary_send():
+    try:
+        from modules.kis_api import KISApi
+        msg = dhs.build(pf.portfolio, KISApi())
+        await send(msg)
+    except Exception as e:
+        print(f"  ❌ 보유 종목 일일 요약 실패: {e}")
+
+async def earnings_pre_alert_send():
+    try:
+        msg = epa.build_alert(pf.portfolio, days_ahead=1)
+        if msg:
+            await send(msg)
+    except Exception as e:
+        print(f"  ❌ 어닝 사전 알림 실패: {e}")
+
+async def rebound_watchlist_update():
+    try:
+        # 경량 후보: 기존 KR/US 스캐너 결과를 후보 텍스트로 저장
+        kr_msg = pkr.scan() or ""
+        us_msg = pus.scan() or ""
+        kr = [x.strip("- ").strip() for x in kr_msg.splitlines() if x.startswith("-")]
+        us = [x.strip("- ").strip() for x in us_msg.splitlines() if x.startswith("-")]
+        rbw.update_candidates(kr, us)
+    except Exception as e:
+        print(f"  ❌ rebound 후보 업데이트 실패: {e}")
+
+async def rebound_turn_check():
+    try:
+        sig = rbw.detect_turn_signal()
+        if sig.get("KR"):
+            msg = rbw.build_alert("KR")
+            if msg:
+                await send(msg)
+        if sig.get("US"):
+            msg = rbw.build_alert("US")
+            if msg:
+                await send(msg)
+    except Exception as e:
+        print(f"  ❌ rebound 전환 체크 실패: {e}")
+
+async def exit_manager_check():
+    try:
+        alerts = exm.scan(pf.portfolio)
+        for a in alerts:
+            await send(a)
+    except Exception as e:
+        print(f"  ❌ exit manager 체크 실패: {e}")
+
+async def split_entry_tracker_check():
+    try:
+        alerts = setr.check(getattr(ew, "watchlist", {}) or {})
+        for a in alerts:
+            await send(a)
+    except Exception as e:
+        print(f"  ❌ split entry tracker 체크 실패: {e}")
 
 
 # ── 빅테크 모니터 스케줄 함수 ─────────────────────────────────────
@@ -2972,6 +3696,12 @@ def schedule_thread():
     schedule.every().day.at("05:00").do(run_schedule_job, premarket_morning_scan)
     # 아침 — 07:00 장세 분석 먼저, 그 다음 브리핑
     schedule.every().day.at("07:00").do(run_schedule_job, market_regime_analysis)
+    schedule.every().day.at("07:00").do(run_schedule_job, prev_day_us_scan)
+    schedule.every().day.at("07:00").do(run_schedule_job, position_manager_daily)
+    schedule.every().day.at("07:00").do(run_schedule_job, daily_holding_summary_send)
+    schedule.every().day.at("07:00").do(run_schedule_job, earnings_pre_alert_send)
+    schedule.every().day.at("07:05").do(run_schedule_job, daily_loss_limit_notice)
+    schedule.every().day.at("07:05").do(run_schedule_job, rebound_turn_check)
     schedule.every().day.at("06:00").do(run_schedule_job, run_daily_rotation)
     schedule.every().day.at("07:00").do(run_schedule_job, morning_briefing)
     schedule.every().day.at("07:00").do(run_schedule_job, earnings_check)
@@ -2986,21 +3716,48 @@ def schedule_thread():
     schedule.every().day.at("09:00").do(run_schedule_job, bigtech_monitor_run)
     schedule.every().day.at("09:05").do(run_schedule_job, run_supply_scan)
     schedule.every().day.at("09:05").do(run_schedule_job, dart_scan)
+    schedule.every().day.at("09:07").do(run_schedule_job, dart_event_driven_scan)
+    schedule.every().day.at("09:05").do(run_schedule_job, theme_scan_morning_surge)
+    schedule.every().day.at("09:10").do(run_schedule_job, theme_scan_morning_surge)
+    schedule.every().day.at("09:15").do(run_schedule_job, theme_scan_morning_surge)
+    schedule.every().day.at("09:20").do(run_schedule_job, theme_scan_morning_surge)
+    schedule.every().day.at("09:25").do(run_schedule_job, theme_scan_morning_surge)
+    schedule.every().day.at("09:30").do(run_schedule_job, theme_scan_morning_surge)
     schedule.every().day.at("09:40").do(run_schedule_job, conviction_recommend)
+    schedule.every().day.at("09:40").do(run_schedule_job, theme_scan_pullback)
+    schedule.every().day.at("09:40").do(run_schedule_job, pullback_kr_scan)
     schedule.every().day.at("13:00").do(run_schedule_job, run_supply_scan)
     schedule.every().day.at("13:00").do(run_schedule_job, dart_scan)
     # 장마감
     schedule.every().day.at("14:30").do(run_schedule_job, afternoon_recommendation)
+    schedule.every().day.at("14:30").do(run_schedule_job, kr_stabilization_check_1430)
+    schedule.every().day.at("13:30").do(run_schedule_job, theme_scan_afternoon_surge)
+    schedule.every().day.at("14:00").do(run_schedule_job, theme_scan_afternoon_surge)
+    schedule.every().day.at("14:30").do(run_schedule_job, theme_scan_afternoon_surge)
+    # 익절/트레일링 알림(일반): 하루 2회만 발송 (KR 1회 + US 1회)
+    schedule.every().day.at("14:20").do(run_schedule_job, exit_manager_check)
     schedule.every().day.at("15:40").do(run_schedule_job, closing_summary)
+    schedule.every().day.at("15:40").do(run_schedule_job, theme_scan_nxt_preempt)
+    schedule.every().day.at("15:40").do(run_schedule_job, prev_day_kr_scan)
+    schedule.every().day.at("15:40").do(run_schedule_job, rebound_watchlist_update)
+    schedule.every().day.at("15:45").do(run_schedule_job, portfolio_rebalance_signal)
     schedule.every().day.at("16:30").do(run_schedule_job, afternoon_nxt_recommend)
     # 저녁
     schedule.every().day.at("19:50").do(run_schedule_job, nxt_closing_summary)
+    schedule.every().day.at("20:00").do(run_schedule_job, earnings_pre_alert_send)
     # 미국장
     schedule.every().day.at("20:30").do(run_schedule_job, us_pre_trading_briefing)
     schedule.every().day.at("21:00").do(run_schedule_job, us_premarket_analysis)
     schedule.every().day.at("22:00").do(run_schedule_job, bigtech_monitor_run)
+    schedule.every().day.at("22:05").do(run_schedule_job, rebound_turn_check)
+    schedule.every().day.at("22:40").do(run_schedule_job, exit_manager_check)
+    schedule.every().day.at("23:00").do(run_schedule_job, theme_scan_earnings_preview)
+    schedule.every().day.at("23:00").do(run_schedule_job, us_stabilization_check_2300)
     schedule.every().day.at("23:30").do(run_schedule_job, us_lowpoint_scan)
     schedule.every().day.at("23:30").do(run_schedule_job, us_short_term_recommend)
+    schedule.every().day.at("23:30").do(run_schedule_job, theme_scan_us_etf_surge)
+    schedule.every().day.at("23:30").do(run_schedule_job, pullback_us_scan)
+    schedule.every().day.at("00:30").do(run_schedule_job, theme_scan_us_top_movers)
     # 실시간 (2분씩 엇갈려서 라즈베리파이 부하 분산)
     # intraday_scan: :00, :30
     # longterm_scan:  :02, :32
@@ -3014,12 +3771,18 @@ def schedule_thread():
         schedule.every().day.at(f"{hh}:32").do(run_schedule_job, longterm_scan)
         schedule.every().day.at(f"{hh}:04").do(run_schedule_job, highlow_scan)
         schedule.every().day.at(f"{hh}:34").do(run_schedule_job, highlow_scan)
+        schedule.every().day.at(f"{hh}:05").do(run_schedule_job, entry_watch_check)
+        schedule.every().day.at(f"{hh}:35").do(run_schedule_job, entry_watch_check)
         schedule.every().day.at(f"{hh}:06").do(run_schedule_job, backtest_price_check)
         schedule.every().day.at(f"{hh}:36").do(run_schedule_job, backtest_price_check)
         # 이상 신호 감지 (규칙 기반, AI 호출 없음) — :08/:38
         schedule.every().day.at(f"{hh}:08").do(run_schedule_job, anomaly_check)
         schedule.every().day.at(f"{hh}:38").do(run_schedule_job, anomaly_check)
-    
+        schedule.every().day.at(f"{hh}:10").do(run_schedule_job, volume_climax_holdings_check)
+        schedule.every().day.at(f"{hh}:40").do(run_schedule_job, volume_climax_holdings_check)
+        schedule.every().day.at(f"{hh}:14").do(run_schedule_job, rebound_turn_check)
+        schedule.every().day.at(f"{hh}:44").do(run_schedule_job, rebound_turn_check)
+        
     # 주말 스케줄
     schedule.every().saturday.at("06:00").do(run_schedule_job, weekend_us_closing)
     schedule.every().saturday.at("08:00").do(run_schedule_job, weekend_backtest_summary)
@@ -3027,6 +3790,7 @@ def schedule_thread():
     schedule.every().sunday.at("08:00").do(run_schedule_job, weekend_macro_check)
     schedule.every().sunday.at("20:00").do(run_schedule_job, weekend_social_collect)
     schedule.every().monday.at("07:00").do(run_schedule_job, monday_weekly_briefing)
+    schedule.every().monday.at("07:00").do(run_schedule_job, sector_rotation_weekly)
 
     # 주말 도박 watchlist 검토 (토요일 12:00)
     schedule.every().saturday.at("12:00").do(run_schedule_job, gamble_weekly_review)
@@ -3124,6 +3888,9 @@ def main():
     app.add_handler(CommandHandler("supply",      cmd_supply))
     app.add_handler(CommandHandler("portfolio",   cmd_portfolio))
     app.add_handler(CommandHandler("buy",         cmd_buy))
+    app.add_handler(CommandHandler("watch",       cmd_watch))
+    app.add_handler(CommandHandler("watchlist",   cmd_watchlist))
+    app.add_handler(CommandHandler("unwatch",     cmd_unwatch))
     app.add_handler(CommandHandler("sell",        cmd_sell))
     app.add_handler(CommandHandler("diagnosis",   cmd_diagnosis))
     app.add_handler(CommandHandler("news_impact", cmd_news_impact))
