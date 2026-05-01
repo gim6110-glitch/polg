@@ -81,19 +81,37 @@ class Portfolio:
         self._save_portfolio()
 
     def _deduct_cash(self, market, amount):
-        """예수금 차감 (매수 시) — 잔액 부족 시 False 반환"""
+        """예수금 차감 (매수 시). (성공여부, 상세메시지) 반환"""
         if market == "KR":
             current = self.portfolio.get("_cash", 0)
             if current < amount:
-                return False
+                return False, f"원화 예수금 부족 (보유: ₩{current:,.0f} / 필요: ₩{amount:,.0f})"
             self.portfolio["_cash"] = current - amount
+            self._save_portfolio()
+            return True, ""
         else:
-            current = self.portfolio.get("_cash_usd", 0.0)
-            if current < amount:
-                return False
-            self.portfolio["_cash_usd"] = current - amount
-        self._save_portfolio()
-        return True
+            usd_current = self.portfolio.get("_cash_usd", 0.0)
+            if usd_current >= amount:
+                self.portfolio["_cash_usd"] = usd_current - amount
+                self._save_portfolio()
+                return True, ""
+
+            # 통합계좌 대응: USD 부족분을 KRW에서 환전해 자동 차감
+            short_usd   = amount - usd_current
+            rate        = self._get_exchange_rate()
+            needed_krw  = short_usd * rate
+            krw_current = self.portfolio.get("_cash", 0)
+
+            if krw_current < needed_krw:
+                return False, (
+                    f"통합 예수금 부족 (USD 보유: ${usd_current:,.2f}, "
+                    f"KRW 보유: ₩{krw_current:,.0f}, 필요 환전액: ₩{needed_krw:,.0f} @ {rate:,.1f})"
+                )
+
+            self.portfolio["_cash_usd"] = 0.0
+            self.portfolio["_cash"]     = krw_current - needed_krw
+            self._save_portfolio()
+            return True, f"환전 반영: USD 부족분 ${short_usd:,.2f} → ₩{needed_krw:,.0f} 차감 (환율 {rate:,.1f})"
 
     # ───────────────────────────────────────────────
     # 환율 조회
@@ -203,13 +221,11 @@ class Portfolio:
         quantity  = int(quantity)
         total     = buy_price * quantity
 
+        cash_note = ""              
         if deduct_cash:
-            ok = self._deduct_cash(market, total)
+            ok, cash_note = self._deduct_cash(market, total)
             if not ok:
-                cash = self.get_cash()
-                avail = cash['KRW'] if market == "KR" else cash['USD']
-                currency = "₩" if market == "KR" else "$"
-                return False, f"예수금 부족 (보유: {currency}{avail:,.0f} / 필요: {currency}{total:,.0f})"
+                return False, cash_note
 
         # 기존 종목이면 평균단가 계산
         if ticker in self.portfolio and not ticker.startswith("_"):
@@ -239,7 +255,10 @@ class Portfolio:
         self._save_portfolio()
         currency = "$" if market == "US" else "₩"
         print(f"✅ {name} 매수: {currency}{buy_price:,} × {quantity}주 = {currency}{total:,.0f}")
-        return True, f"✅ 매수 완료"
+        msg = "✅ 매수 완료"
+        if cash_note:
+            msg += f"\n{cash_note}"
+        return True, msg
 
     # ───────────────────────────────────────────────
     # 종목 제거 (매도)
@@ -316,6 +335,7 @@ class Portfolio:
         results        = []
         total_invested = 0
         total_current  = 0
+        exchange_rate  = self._get_exchange_rate()
 
         for ticker, stock in self.portfolio.items():
             if ticker.startswith("_"):
@@ -334,8 +354,10 @@ class Portfolio:
                 profit      = 0
                 profit_pct  = 0
 
-            total_invested += invested
-            total_current  += current_val
+            invested_krw = invested * exchange_rate if stock['market'] == "US" else invested
+            current_krw  = current_val * exchange_rate if stock['market'] == "US" else current_val
+            total_invested += invested_krw
+            total_current  += current_krw
 
             results.append({
                 "name":          stock['name'],
@@ -347,9 +369,12 @@ class Portfolio:
                 "quantity":      quantity,
                 "invested":      invested,
                 "current_val":   current_val,
+                "invested_krw":  invested_krw,
+                "current_val_krw": current_krw,    
                 "profit":        profit,
                 "profit_pct":    profit_pct,
                 "change_pct":    change_pct or 0,
+                "exchange_rate": exchange_rate,
                 "target1":       stock.get('target1'),
                 "target2":       stock.get('target2'),
                 "stop_loss":     stock.get('stop_loss'),
@@ -465,16 +490,47 @@ class Portfolio:
             profit_pct = 0
             if current_price:
                 profit_pct = ((current_price - stock['buy_price']) / stock['buy_price']) * 100
+            short_term_change = None
+            trend_signal = "데이터부족"
+            try:
+                import yfinance as yf
+                hist = yf.Ticker(ticker).history(period="2mo").dropna()
+                if len(hist) >= 22:
+                    c = hist['Close']
+                    chg_5d = ((c.iloc[-1] - c.iloc[-6]) / c.iloc[-6]) * 100
+                    chg_20d = ((c.iloc[-1] - c.iloc[-21]) / c.iloc[-21]) * 100
+                    short_term_change = round(chg_5d, 2)
+                    if chg_20d <= -8 and chg_5d <= -3:
+                        trend_signal = "지속하락의심"
+                    elif chg_20d < 0 and chg_5d > 0:
+                        trend_signal = "기술적반등"
+                    elif chg_20d >= 0 and chg_5d < -3:
+                        trend_signal = "단기조정"
+                    elif chg_20d >= 0 and chg_5d >= 0:
+                        trend_signal = "상승추세유지"
+                    else:
+                        trend_signal = "중립혼조"
+            except Exception:
+                pass
             holdings.append({
                 "name":       stock['name'],
                 "ticker":     ticker,
                 "hold_type":  stock.get('hold_type', '장기'),
                 "profit_pct": round(profit_pct, 2),
+                "chg_5d":     short_term_change,
+                "trend":      trend_signal,
             })
             time.sleep(0.2)
 
         news_text     = "\n".join([f"{i+1}. [{n['source']}] {n['title']}" for i, n in enumerate(news_list[:10])])
-        holdings_text = "\n".join([f"- {h['name']} ({h['ticker']}): {h['profit_pct']:+.1f}% [{h['hold_type']}]" for h in holdings])
+        rows = []
+        for h in holdings:
+            chg_5d_text = f"{h['chg_5d']:+.1f}%" if h['chg_5d'] is not None else "N/A"
+            rows.append(
+                f"- {h['name']} ({h['ticker']}): {h['profit_pct']:+.1f}% "
+                f"[{h['hold_type']}] | 5일:{chg_5d_text} | {h['trend']}"
+            )
+        holdings_text = "\n".join(rows)
 
         from anthropic import Anthropic
         client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
@@ -491,13 +547,14 @@ class Portfolio:
 형식:
 [종목명] 상태: ✅순항/⚠️주의/🚨위험
 이유: (한 줄)
+추세판단: 단기조정/기술적반등/지속하락의심 중 하나를 명시
 판단: 계속보유/익절고려/손절고려
 
 마지막에 총평 한 줄."""
 
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=600,
+                model="claude-sonnet-4-6", max_tokens=1400,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.content[0].text
@@ -529,7 +586,7 @@ class Portfolio:
 
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=300,
+                model="claude-sonnet-4-6", max_tokens=900,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.content[0].text

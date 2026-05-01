@@ -10,6 +10,7 @@ load_dotenv('/media/dps/T7/stock_ai/.env')
 
 GUARD_FILE    = "/media/dps/T7/stock_ai/data/trade_guard.json"
 SNAPSHOT_FILE = "/media/dps/T7/stock_ai/data/asset_snapshots.json"
+LOSS_COUNTER_FILE = "/media/dps/T7/stock_ai/data/loss_counter.json"
 
 
 class TradeGuard:
@@ -22,7 +23,9 @@ class TradeGuard:
     def __init__(self):
         self.data      = self._load()
         self.snapshots = self._load_snapshots()
-
+        self.loss_counter = self._load_loss_counter()
+        self.market_gate = {"blocked": False, "reason": "", "until": None, "scope": "ALL"}
+    
     # ── 파일 관리 ──────────────────────────────────
 
     def _load(self):
@@ -57,6 +60,169 @@ class TradeGuard:
         with open(SNAPSHOT_FILE, "w", encoding="utf-8") as f:
             json.dump(self.snapshots, f, ensure_ascii=False, indent=2)
 
+    def _load_loss_counter(self):
+        if os.path.exists(LOSS_COUNTER_FILE):
+            with open(LOSS_COUNTER_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _save_loss_counter(self):
+        os.makedirs(os.path.dirname(LOSS_COUNTER_FILE), exist_ok=True)
+        with open(LOSS_COUNTER_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.loss_counter, f, ensure_ascii=False, indent=2)
+
+    def record_trade_result(self, ticker, profit_pct):
+        """종목별 연속 손실 카운트. 3회면 30일 블랙리스트."""
+        row = self.loss_counter.get(ticker, {"consecutive_losses": 0, "black_until": None})
+        if profit_pct < 0:
+            row["consecutive_losses"] = int(row.get("consecutive_losses", 0)) + 1
+            if row["consecutive_losses"] >= 3:
+                row["black_until"] = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        else:
+            row["consecutive_losses"] = 0
+            row["black_until"] = None
+        self.loss_counter[ticker] = row
+        self._save_loss_counter()
+        return row
+
+    def is_blacklisted(self, ticker):
+        row = self.loss_counter.get(ticker)
+        if not row or not row.get("black_until"):
+            return False, None
+        if datetime.now().strftime("%Y-%m-%d") <= row["black_until"]:
+            return True, row["black_until"]
+        row["black_until"] = None
+        row["consecutive_losses"] = 0
+        self.loss_counter[ticker] = row
+        self._save_loss_counter()
+        return False, None
+
+    def get_blacklist_status_text(self):
+        active = []
+        for t, r in self.loss_counter.items():
+            b = r.get("black_until")
+            if b and datetime.now().strftime("%Y-%m-%d") <= b:
+                active.append(f"{t}({b}까지)")
+        return "없음" if not active else ", ".join(active[:10])
+
+    def evaluate_global_market_gate(self, kospi_change=0.0, sp500_change=0.0, vix=20.0):
+        """
+        KR/US 공통 시장 게이트:
+        - VIX > 35: 전면 차단 (완화 없음)
+        - KR: -3% 이하 2시간 차단, 연속하락+ -4%는 14:30까지
+        - US: -2.5% 이하 차단, 연속하락+ -4%는 23:00까지
+        """
+        now = datetime.now()
+
+        # 1) 구조적 공포: 완화 없는 전면 차단
+        if vix > 35:
+            self.market_gate = {
+                "blocked": True,
+                "reason": f"VIX {vix:.1f} 구조적 공포",
+                "until": None,
+                "scope": "ALL",
+            }
+            return self.market_gate
+
+        # 2) KR 게이트
+        kr_falling = self._is_consecutive_fall("^KS11", days=2)
+        if kospi_change <= -4.0 and kr_falling:
+            until = now.replace(hour=14, minute=30, second=0, microsecond=0)
+            if now > until:
+                until = now + timedelta(hours=1)
+            self.market_gate = {
+                "blocked": True,
+                "reason": f"KR 연속하락+급락 {kospi_change:+.1f}%",
+                "until": until.isoformat(),
+                "scope": "KR",
+            }
+            return self.market_gate
+        if kospi_change <= -3.0:
+            self.market_gate = {
+                "blocked": True,
+                "reason": f"KR 급락 {kospi_change:+.1f}%",
+                "until": (now + timedelta(hours=2)).isoformat(),
+                "scope": "KR",
+            }
+            return self.market_gate
+
+        # 3) US 게이트
+        us_falling = self._is_consecutive_fall("^GSPC", days=2)
+        if sp500_change <= -4.0 and us_falling:
+            until = now.replace(hour=23, minute=0, second=0, microsecond=0)
+            if now > until:
+                until = now + timedelta(hours=1)
+            self.market_gate = {
+                "blocked": True,
+                "reason": f"US 연속하락+급락 {sp500_change:+.1f}%",
+                "until": until.isoformat(),
+                "scope": "US",
+            }
+            return self.market_gate
+        if sp500_change <= -2.5:
+            self.market_gate = {
+                "blocked": True,
+                "reason": f"US 급락 {sp500_change:+.1f}%",
+                "until": (now + timedelta(hours=2)).isoformat(),
+                "scope": "US",
+            }
+            return self.market_gate
+
+        # 4) 기존 차단 자동 해제
+        until = self.market_gate.get("until")
+        if self.market_gate.get("blocked") and until:
+            try:
+                if now > datetime.fromisoformat(until):
+                    self.market_gate = {"blocked": False, "reason": "", "until": None, "scope": "ALL"}
+            except Exception:
+                self.market_gate = {"blocked": False, "reason": "", "until": None, "scope": "ALL"}
+        return self.market_gate
+
+    def check_kr_stabilization_1430(self):
+        """13:00 대비 14:30 추가하락 -1% 이내면 안정화"""
+        try:
+            import yfinance as yf
+            h = yf.Ticker("^KS11").history(period="1d", interval="30m").dropna()
+            if len(h) < 4:
+                return None
+            at_1300 = h.between_time("13:00", "13:00")
+            at_1430 = h.between_time("14:30", "14:30")
+            if at_1300.empty or at_1430.empty:
+                return None
+            p1 = float(at_1300["Close"].iloc[-1]); p2 = float(at_1430["Close"].iloc[-1])
+            extra = ((p2 - p1) / p1) * 100 if p1 else 0
+            return {"stable": extra >= -1.0, "extra_drop": extra}
+        except Exception:
+            return None
+
+    def check_us_stabilization_2300(self):
+        """21:30 대비 23:00 추가하락 -1% 이내면 안정화"""
+        try:
+            import yfinance as yf
+            h = yf.Ticker("^GSPC").history(period="1d", interval="30m").dropna()
+            if len(h) < 4:
+                return None
+            at_2130 = h.between_time("21:30", "21:30")
+            at_2300 = h.between_time("23:00", "23:00")
+            if at_2130.empty or at_2300.empty:
+                return None
+            p1 = float(at_2130["Close"].iloc[-1]); p2 = float(at_2300["Close"].iloc[-1])
+            extra = ((p2 - p1) / p1) * 100 if p1 else 0
+            return {"stable": extra >= -1.0, "extra_drop": extra}
+        except Exception:
+            return None
+            
+    def _is_consecutive_fall(self, ticker, days=2):
+        try:
+            import yfinance as yf
+            h = yf.Ticker(ticker).history(period="7d").dropna()
+            if len(h) < days + 1:
+                return False
+            closes = h["Close"].tail(days + 1).tolist()
+            return all(closes[i] > closes[i + 1] for i in range(len(closes) - 1))
+        except Exception:
+            return False
+    
     # ── 총자산 스냅샷 ──────────────────────────────
 
     def save_snapshot(self, total_assets_krw, exchange_rate=1300.0):

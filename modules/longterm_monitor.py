@@ -129,6 +129,57 @@ class LongtermMonitor:
     def _analyze_stock(self, name, ticker, market="KR"):
         """종목 분석 — 이동평균선 + 주봉 중심"""
         try:
+            # 한국장은 KIS API 우선(실시간) 사용
+            if market == "KR":
+                ind = self.kis.calc_indicators_kr(ticker, days=260) or {}
+                current = float(ind.get("price", 0) or 0)
+                ma5_val = float(ind.get("ma5", 0) or 0)
+                ma20_val = float(ind.get("ma20", 0) or 0)
+                ma60_val = float(ind.get("ma60", 0) or 0)
+                rsi = float(ind.get("rsi", 50) or 50)
+                vol_ratio = float(ind.get("vol_ratio", 1) or 1)
+                macd = float(ind.get("macd", 0) or 0)
+                macd_signal = float(ind.get("macd_signal", 0) or 0)
+                macd_hist = float(ind.get("macd_hist", 0) or 0)
+                drawdown = float(ind.get("drawdown", 0) or 0)
+
+                if current <= 0:
+                    return None
+
+                above_ma5 = ma5_val > 0 and current > ma5_val
+                above_ma20 = ma20_val > 0 and current > ma20_val
+                above_ma60 = ma60_val > 0 and current > ma60_val
+                is_bullish_array = ma5_val > ma20_val > ma60_val if (ma5_val and ma20_val and ma60_val) else False
+                ma20_gap = ((current - ma20_val) / ma20_val) * 100 if ma20_val > 0 else 0
+
+                return {
+                    "name":            name,
+                    "ticker":          ticker,
+                    "market":          market,
+                    "price":           current,
+                    "ma5":             round(ma5_val, 2),
+                    "ma20":            round(ma20_val, 2),
+                    "ma60":            round(ma60_val, 2),
+                    "above_ma5":       above_ma5,
+                    "above_ma20":      above_ma20,
+                    "above_ma60":      above_ma60,
+                    "is_bullish_array":is_bullish_array,
+                    "ma5_touch":       False,
+                    "ma20_gap":        round(ma20_gap, 2),
+                    "drawdown":        round(drawdown, 2),
+                    "vol_ratio":       round(vol_ratio, 2),
+                    "vol_trend":       round(vol_ratio, 2),
+                    "healthy_pullback":False,
+                    "above_wma5":      above_ma20,
+                    "above_wma20":     above_ma60,
+                    "rsi":             round(rsi, 1),
+                    "from_low":        100.0,
+                    "ath_prox":        90.0,
+                    "macd":            round(macd, 3),
+                    "macd_signal":     round(macd_signal, 3),
+                    "macd_hist":       round(macd_hist, 3),
+                }
+
             import yfinance as yf
 
             yf_ticker = f"{ticker}.KS" if market == "KR" else ticker
@@ -208,6 +259,11 @@ class LongtermMonitor:
             loss  = (-delta.clip(upper=0)).rolling(14).mean()
             rs    = gain / loss
             rsi   = round((100 - (100 / (1 + rs))).iloc[-1], 1)
+            ema12 = close.ewm(span=12, adjust=False).mean()
+            ema26 = close.ewm(span=26, adjust=False).mean()
+            macd = ema12 - ema26
+            macd_signal = macd.ewm(span=9, adjust=False).mean()
+            macd_hist = macd - macd_signal
 
             # KIS 실시간 가격
             if market == "KR":
@@ -246,6 +302,9 @@ class LongtermMonitor:
                 "drawdown":        round(drawdown, 1),
                 "ath_prox":        round(ath_prox, 1),
                 "rsi":             rsi,
+                "macd":            round(float(macd.iloc[-1]), 4),
+                "macd_signal":     round(float(macd_signal.iloc[-1]), 4),
+                "macd_hist":       round(float(macd_hist.iloc[-1]), 4),
                 "vol_ratio":       round(vol_ratio, 1),
                 "vol_trend":       round(vol_trend, 2),
                 "healthy_pullback": healthy_pullback,
@@ -285,6 +344,8 @@ class LongtermMonitor:
         above_wma20    = data.get('above_wma20', False)
         ath_prox       = data.get('ath_prox', 90)
         healthy_pb     = data.get('healthy_pullback', False)
+        macd = data.get('macd', 0)
+        macd_signal = data.get('macd_signal', 0)
 
         if is_gamble:
             # 도박: 52주 저점 근처 + 반등 시작
@@ -306,6 +367,9 @@ class LongtermMonitor:
             if rsi <= 35:
                 score += 2
                 signals.append(f"✅ RSI {rsi:.0f} 과매도")
+            if macd > macd_signal:
+                score += 1
+                signals.append("✅ MACD 상향")
             return score, signals
 
         # ── 중장기: 장세별 차등 적용 ──
@@ -360,6 +424,9 @@ class LongtermMonitor:
             elif rsi >= 80:
                 score -= 1
                 signals.append(f"⚠️ RSI {rsi:.0f} 과열")
+            if macd > macd_signal:
+                score += 1
+                signals.append("✅ MACD 우상향")
 
         elif cycle_stage in ["과열경계", "과열"]:
             # 과열 구간 — 더 엄격, 눌림목 확인 필수
@@ -397,6 +464,9 @@ class LongtermMonitor:
             elif rsi >= 70:
                 score -= 1
                 signals.append(f"⚠️ RSI {rsi:.0f} 다소 과열")
+            if macd < macd_signal:
+                score -= 1
+                signals.append("⚠️ MACD 둔화")
 
         else:
             # 조정초입/조정중 — 보수적, 60일선 지지 확인
@@ -429,6 +499,9 @@ class LongtermMonitor:
             elif rsi <= 40:
                 score += 1
                 signals.append(f"✅ RSI {rsi:.0f} 매수 구간")
+            if macd > macd_signal:
+                score += 1
+                signals.append("✅ MACD 반등 확인")
 
         return score, signals
 

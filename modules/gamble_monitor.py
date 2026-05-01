@@ -18,11 +18,15 @@ class GambleMonitor:
     - gamble_watchlist.json 파일 기반
     - 매주 토요일 AI 자동 검토 (탈락/유지/신규 발굴)
     - /gamble 명령어로 수동 관리
-    - 총자산 5% 이하 고정
+    - 총자산 2% 이하 소액 원칙
     """
 
     def __init__(self):
         self.watchlist = self._load()
+        self.log_prefix = "[GambleMonitor]"
+
+    def _log(self, level, fn, msg):
+        print(f"{self.log_prefix}[{fn}][{level}] {msg}")
 
     # ── 파일 관리 ──────────────────────────────────────
 
@@ -31,7 +35,20 @@ class GambleMonitor:
             with open(GAMBLE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         # 최초 생성
-        default = {"version": "1.0", "updated_at": datetime.now().strftime("%Y-%m-%d"), "stocks": {}}
+        default = {
+            "version": "1.0",
+            "updated_at": datetime.now().strftime("%Y-%m-%d"),
+            "stocks": {
+                "APLD": {"name": "Applied Digital", "theme": "AI데이터센터", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "AMPX": {"name": "Amprius", "theme": "혁신배터리", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "RXRX": {"name": "Recursion", "theme": "AI신약", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "IONQ": {"name": "IonQ", "theme": "양자컴", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "RKLB": {"name": "Rocket Lab", "theme": "우주항공", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "OKLO": {"name": "Oklo", "theme": "소형원자로", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "RGTI": {"name": "Rigetti", "theme": "양자컴", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+                "ASTS": {"name": "AST SpaceMobile", "theme": "위성통신", "memo": "", "added_at": datetime.now().strftime("%Y-%m-%d"), "status": "유지", "last_reviewed": datetime.now().strftime("%Y-%m-%d")},
+            },
+        }
         self._save(default)
         return default
 
@@ -80,7 +97,7 @@ class GambleMonitor:
             return "📋 도박 watchlist 비어있음\n/gamble add TICKER 이름 테마 메모"
 
         msg  = f"🎰 <b>도박 Watchlist</b> ({len(stocks)}개)\n"
-        msg += f"<i>총자산 5% 이하 고정 | 손절 없음 | 1~5년 홀딩</i>\n\n"
+        msg += f"<i>총자산 2% 이하 권장 | 손절 없음 | 1~5년 홀딩</i>\n\n"
 
         # 테마별 그룹핑
         by_theme = {}
@@ -159,9 +176,14 @@ class GambleMonitor:
             rs    = gain / loss
             rsi   = round((100 - (100 / (1 + rs))).iloc[-1], 1)
 
-            # OBV 방향
+            # OBV 방향 + 5일선
             obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
             obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
+            ma5 = close.rolling(5).mean()
+            ma5_now = ma5.iloc[-1]
+            ma5_prev = ma5.iloc[-2] if len(ma5) >= 2 else ma5_now
+            prev_close = close.iloc[-2] if len(close) >= 2 else current
+            ma5_breakout = prev_close <= ma5_prev and current > ma5_now
 
             # 6개월 수익률
             ret_6m = round(((current - close.iloc[0]) / close.iloc[0]) * 100, 1)
@@ -175,10 +197,11 @@ class GambleMonitor:
                 "obv_trend":     obv_trend,
                 "ret_6m":        ret_6m,
                 "low_proximity": low_proximity,
-                "vol_ratio":     round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1
+                "vol_ratio":     round(curr_vol / avg_vol, 1) if avg_vol > 0 else 1,
+                "ma5_breakout":  ma5_breakout
             }
         except Exception as e:
-            print(f"  ⚠️ {ticker} 데이터 수집 실패: {e}")
+            self._log("WARN", "_get_stock_data", f"{ticker} 데이터 수집 실패: {e}")
             return None
 
     async def _get_social_context(self, tickers):
@@ -259,7 +282,7 @@ JSON으로만 답하세요:
             if m:
                 return json.loads(m.group())
         except Exception as e:
-            print(f"  ❌ AI 검토 실패: {e}")
+            self._log("ERROR", "_ai_review", str(e))
         return None
 
     def _apply_review_result(self, result, stock_data):
@@ -360,7 +383,7 @@ JSON으로만:
                     msg += "\n추가하려면: /gamble add TICKER 이름 테마"
                     return msg
         except Exception as e:
-            print(f"  ❌ 신규 발굴 실패: {e}")
+            self._log("ERROR", "_discover_new_candidates", str(e))
         return ""
 
     # ── 30분마다 스캔 ──────────────────────────────────
@@ -388,15 +411,15 @@ JSON으로만:
                 score   += 3
                 sig_list.append(f"RSI {data['rsi']} 과매도")
 
+            # 5일선 돌파
+            if data.get("ma5_breakout", False):
+                score   += 2
+                sig_list.append("5일선 돌파")
+
             # 거래량 2배
             if data.get("vol_ratio", 1) >= 2:
                 score   += 3
                 sig_list.append(f"거래량 {data['vol_ratio']}배 급증")
-
-            # OBV 상승 전환
-            if data.get("obv_trend") == "상승":
-                score   += 2
-                sig_list.append("OBV 상승 전환")
 
             if score >= 5:
                 signals.append({
@@ -409,7 +432,35 @@ JSON으로만:
                     "rsi":     data.get("rsi"),
                 })
 
-        return signals
+        return await self._ai_verify_candidates(signals)
+
+    async def _ai_verify_candidates(self, signals):
+        """점수 통과 종목 AI 1회 검증"""
+        if not signals:
+            return signals
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+            lines = []
+            for s in signals:
+                lines.append(f"{s['ticker']} score:{s['score']} signals:{', '.join(s['signals'])} rsi:{s.get('rsi')}")
+            prompt = (
+                "다음 도박 후보에서 과열 추격성/유동성 위험이 큰 종목을 제외하고 1~3개만 남겨라.\n"
+                "JSON only: {\"keep\": [\"TICKER\", ...]}\n\n" + "\n".join(lines)
+            )
+            res = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = res.content[0].text.strip()
+            data = json.loads(text[text.find("{"):text.rfind("}") + 1])
+            keep = set([x.upper() for x in data.get("keep", [])])
+            filtered = [s for s in signals if s["ticker"].upper() in keep]
+            return filtered if filtered else signals[:2]
+        except Exception as e:
+            self._log("WARN", "_ai_verify_candidates", f"도박 AI 검증 실패(규칙기반 유지): {e}")
+            return signals
 
     def build_buy_timing_message(self, signals):
         """도박 매수 타이밍 알림"""
@@ -438,8 +489,9 @@ async def cmd_gamble(update, context):
     """
     /gamble — 목록 보기
     /gamble list — 목록 보기
-    /gamble add TICKER 이름 테마 메모 — 추가
+    /gamble add TICKER [이름] [테마] [메모] — 추가
     /gamble remove TICKER — 제거
+    /gamble scan — 즉시 스캔
     """
     gm   = GambleMonitor()
     args = context.args if context.args else []
@@ -451,14 +503,11 @@ async def cmd_gamble(update, context):
         return
 
     if args[0] == "add":
-        if len(args) < 3:
-            await update.message.reply_text(
-                "사용법: /gamble add TICKER 이름 테마 메모\n"
-                "예) /gamble add PLTR 팔란티어 AI분석 피터틸창업"
-            )
+        if len(args) < 2:
+            await update.message.reply_text("사용법: /gamble add TICKER [이름] [테마] [메모]")
             return
         ticker = args[1]
-        name   = args[2]
+        name   = args[2] if len(args) > 2 else ticker
         theme  = args[3] if len(args) > 3 else "혁신기술"
         memo   = " ".join(args[4:]) if len(args) > 4 else ""
         ok, msg = gm.add(ticker, name, theme, memo)
@@ -479,3 +528,8 @@ async def cmd_gamble(update, context):
         "/gamble add TICKER 이름 테마 메모\n"
         "/gamble remove TICKER"
     )
+    if args[0] == "scan":
+        signals = await gm.scan_buy_timing()
+        msg = gm.build_buy_timing_message(signals)
+        await update.message.reply_text(msg or "조건 충족 종목 없음")
+        return

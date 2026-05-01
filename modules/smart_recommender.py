@@ -4,6 +4,7 @@ import json
 import time
 from datetime import datetime
 from dotenv import load_dotenv
+from modules.gap_filter import classify_gap
 
 sys.path.insert(0, '/media/dps/T7/stock_ai')
 load_dotenv('/media/dps/T7/stock_ai/.env')
@@ -242,6 +243,9 @@ class SmartRecommender:
             obv_trend = indicators['obv_trend']
             drawdown  = indicators['drawdown']
             high_52w  = indicators['high_52w']
+            macd = indicators.get('macd', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            macd_cross = indicators.get('macd_cross', 'none')
 
             # ── 1) 수급 (가장 선행, 최고 가중) ─────────
             if supply_data:
@@ -333,6 +337,17 @@ class SmartRecommender:
             elif 45 <= rsi <= 65:
                 score += 1; signals.append(f"RSI {rsi:.0f} 적정")
 
+            # ── 6) MACD 보조 ─────────────────────────────
+            if macd_cross == "golden":
+                score += 2; signals.append("MACD 골든크로스")
+            elif macd_cross == "dead":
+                score -= 2; signals.append("MACD 데드크로스")
+
+            if macd > 0 and macd > macd_signal:
+                score += 1; signals.append("MACD 양수+상승")
+            elif macd < 0:
+                score -= 1; signals.append("MACD 음수")
+
             return {
                 "name":      info["name"],
                 "ticker":    ticker,
@@ -398,6 +413,9 @@ class SmartRecommender:
             ma20 = indicators['ma20']
             ma60 = indicators['ma60']
             rsi  = indicators['rsi']
+            macd = indicators.get('macd', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            macd_cross = indicators.get('macd_cross', 'none')
 
             # ── 1) 핵심: 매집 신호 ──────────────────────
             # 거래량 터졌는데 주가 안 오름 = 세력 조용히 매집 중
@@ -448,6 +466,15 @@ class SmartRecommender:
                 score += 2; signals.append(f"RSI {rsi:.0f} 과매도")
             elif rsi >= 80:
                 score -= 2; signals.append(f"RSI {rsi:.0f} 이미 과열")
+
+            if macd_cross == "golden":
+                score += 2; signals.append("MACD 골든크로스")
+            elif macd_cross == "dead":
+                score -= 2; signals.append("MACD 데드크로스")
+            if macd > 0 and macd > macd_signal:
+                score += 1; signals.append("MACD 양수+상승")
+            elif macd < 0:
+                score -= 1; signals.append("MACD 음수")
 
             # 오늘 이미 급등한 종목은 오후 선점 부적합
             if change >= 5:
@@ -552,6 +579,20 @@ class SmartRecommender:
         candidates.sort(key=lambda x: x['score'], reverse=True)
         top5 = candidates[:5]
 
+        # 장이 강한데도 후보가 0개면 임계값을 1단계 완화해 재시도
+        # (09:40은 원래 엄격하지만, 완전 공백 메시지는 실전에서 신뢰를 떨어뜨림)
+        if not top5:
+            lower = max(1, threshold - 1)
+            print(f"  ⚠️ 확신 후보 없음 → 임계값 {lower} 재시도")
+            for ticker, info in stocks.items():
+                supply_data = supply_results.get(ticker)
+                data = self._score_morning(ticker, info, regime_type, supply_data)
+                if data and data['score'] >= lower:
+                    candidates.append(data)
+                time.sleep(0.10)
+            candidates.sort(key=lambda x: x['score'], reverse=True)
+            top5 = candidates[:5]
+        
         if not top5:
             return None
 
@@ -717,10 +758,10 @@ class SmartRecommender:
                         "signals":   signals,
                     })
 
-                time.sleep(0.05)
-
-            except Exception:
-                pass
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"  warning {ticker} 조회 실패: {e}")
+                continue
 
         candidates.sort(key=lambda x: x['score'], reverse=True)
         top10 = candidates[:10]
@@ -913,6 +954,9 @@ class SmartRecommender:
             msg += f"   {r.get('reason','')}{caution_text}\n\n"
             msg += f"   💰 현재가: {fmt(r.get('current_price', 0))}\n"
             msg += f"   🟢 매수가: {fmt(r.get('buy_price', 0))}\n"
+            gap_pct = float(r.get('change_pct', 0) or 0)
+            market = "US" if str(r.get("ticker", "")).isalpha() else "KR"
+            msg += f"   🏷 갭업:   {classify_gap(market, gap_pct)} ({gap_pct:+.1f}%)\n"
             msg += f"   ⏱ 진입:   {r.get('buy_timing','')}\n"
             msg += f"   🎯 목표1:  {fmt(r.get('target1', 0))}\n"
             msg += f"   🎯 목표2:  {fmt(r.get('target2', 0))}\n"

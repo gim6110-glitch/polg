@@ -26,6 +26,10 @@ class KISApi:
         self.token      = None
         self.token_exp  = None
         self.token_file = "/media/dps/T7/stock_ai/data/kis_token.json"
+        self.timeout_sec = int(os.getenv("API_TIMEOUT_SEC", "10"))
+
+    def _log(self, level, fn, msg):
+        print(f"[KISApi][{fn}][{level}] {msg}")
 
     def _get_token(self):
         if os.path.exists(self.token_file):
@@ -44,7 +48,7 @@ class KISApi:
             "appsecret":  self.app_secret
         }
         try:
-            res  = requests.post(url, json=body, timeout=10)
+            res  = requests.post(url, json=body, timeout=self.timeout_sec)
             data = res.json()
             if 'access_token' in data:
                 self.token     = data['access_token']
@@ -55,13 +59,13 @@ class KISApi:
                         'token':   self.token,
                         'expires': self.token_exp.isoformat()
                     }, f)
-                print("✅ KIS 토큰 발급 완료")
+                self._log("INFO", "_get_token", "KIS 토큰 발급 완료")
                 return self.token
             else:
-                print(f"❌ 토큰 발급 실패: {data}")
+                self._log("ERROR", "_get_token", f"토큰 발급 실패: {data}")
                 return None
         except Exception as e:
-            print(f"❌ 토큰 요청 실패: {e}")
+            self._log("ERROR", "_get_token", f"토큰 요청 실패: {e}")
             return None
 
     def _headers(self, tr_id, use_us=False):
@@ -85,7 +89,7 @@ class KISApi:
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_INPUT_ISCD": code
             }
-            res  = requests.get(url, headers=headers, params=params, timeout=10)
+            res  = requests.get(url, headers=headers, params=params, timeout=self.timeout_sec)
             data = res.json()
             if data.get('rt_cd') == '0':
                 output = data['output']
@@ -275,6 +279,52 @@ class KISApi:
             print(f"❌ 나스닥 조회 실패: {e}")
         return None
 
+    def get_top_fluctuation(self, market="J", count=50):
+        """
+        국내주식 등락률 상위 조회
+        TR: FHPST01020000
+        """
+        try:
+            headers, base = self._headers("FHPST01020000")
+            url = f"{base}/uapi/domestic-stock/v1/ranking/fluctuation"
+            params = {
+                "FID_COND_MRKT_DIV_CODE": market,
+                "FID_COND_SCR_DIV_CODE": "20170",
+                "FID_INPUT_ISCD": "0000",
+                "FID_DIV_CLS_CODE": "0",
+                "FID_BLNG_CLS_CODE": "0",
+                "FID_TRGT_CLS_CODE": "111111111",
+                "FID_TRGT_EXLS_CLS_CODE": "0000000000",
+                "FID_INPUT_PRICE_1": "",
+                "FID_INPUT_PRICE_2": "",
+                "FID_VOL_CNT": "100000",
+                "FID_INPUT_DATE_1": "",
+            }
+            res = requests.get(url, headers=headers, params=params, timeout=self.timeout_sec)
+            data = res.json()
+            if data.get("rt_cd") != "0":
+                print(f"❌ 등락률 상위 조회 실패: {data.get('msg1')}")
+                return []
+
+            rows = []
+            for item in data.get("output", []):
+                try:
+                    rows.append({
+                        "name": item.get("hts_kor_isnm", "").strip(),
+                        "ticker": item.get("stck_shrn_iscd", "").strip(),
+                        "price": int(item.get("stck_prpr", 0) or 0),
+                        "change_pct": float(item.get("prdy_ctrt", 0) or 0),
+                        "volume": int(item.get("acml_vol", 0) or 0),
+                    })
+                except Exception:
+                    continue
+
+            rows.sort(key=lambda x: x["change_pct"], reverse=True)
+            return rows[:max(0, int(count))]
+        except Exception as e:
+            print(f"❌ 등락률 상위 조회 오류: {e}")
+            return []
+
 
 
     def get_kr_stock_info(self, code):
@@ -347,7 +397,7 @@ class KISApi:
     def calc_indicators_kr(self, code, days=60):
         """
         KIS 일봉 기반 기술적 지표 계산
-        반환: dict {rsi, ma5, ma20, ma60, vol_ratio, obv_trend, drawdown, high_52w, low_52w}
+        반환: dict {rsi, ma5, ma20, ma60, vol_ratio, obv_trend, drawdown, high_52w, low_52w, macd, macd_signal, macd_hist, macd_cross}
         """
         rows = self.get_kr_ohlcv(code, days=max(days, 80))
         if not rows or len(rows) < 20:
@@ -379,6 +429,23 @@ class KISApi:
             obv       = (volume * close.diff().apply(lambda x: 1 if x > 0 else -1)).cumsum()
             obv_trend = "상승" if obv.iloc[-1] > obv.iloc[-5] else "하락"
 
+            # MACD
+            ema12 = close.ewm(span=12, adjust=False).mean()
+            ema26 = close.ewm(span=26, adjust=False).mean()
+            macd = ema12 - ema26
+            signal = macd.ewm(span=9, adjust=False).mean()
+            hist = macd - signal
+            prev_macd = macd.iloc[-2] if len(macd) >= 2 else macd.iloc[-1]
+            prev_signal = signal.iloc[-2] if len(signal) >= 2 else signal.iloc[-1]
+            curr_macd = macd.iloc[-1]
+            curr_signal = signal.iloc[-1]
+            if prev_macd <= prev_signal and curr_macd > curr_signal:
+                macd_cross = "golden"
+            elif prev_macd >= prev_signal and curr_macd < curr_signal:
+                macd_cross = "dead"
+            else:
+                macd_cross = "none"
+
             # 52주 고저
             high_52w = close.max()
             low_52w  = close.min()
@@ -394,6 +461,10 @@ class KISApi:
                 "drawdown":  drawdown,
                 "high_52w":  round(high_52w, 0),
                 "low_52w":   round(low_52w, 0),
+                "macd":      round(curr_macd, 4),
+                "macd_signal": round(curr_signal, 4),
+                "macd_hist": round(hist.iloc[-1], 4),
+                "macd_cross": macd_cross,
             }
         except Exception as e:
             print(f"❌ {code} 지표 계산 실패: {e}")
