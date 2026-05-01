@@ -1,7 +1,7 @@
 {
   "rest_until": null,
   "rest_reason": null,
-  "monthly_start": null,
-  "weekly_start": null,
+  "monthly_start": 23771696.0,
+  "weekly_start": 23771696.0,
   "consecutive_losses": 0
 }

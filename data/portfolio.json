@@ -265,6 +265,20 @@
     "buy_date": "2026-04-21",
     "memo": "반도체 진공장비 장기. -34% 손절"
   },
-  "_cash": 6350000,
-  "_cash_usd": 0.0
+  "_cash": 5852750.0,
+  "_cash_usd": 0.0,
+  "064340": {
+    "name": "빅텍",
+    "ticker": "064340",
+    "buy_price": 5850.0,
+    "quantity": 85,
+    "market": "KR",
+    "hold_type": "장기",
+    "target1": null,
+    "target2": null,
+    "stop_loss": null,
+    "exit_target": null,
+    "buy_date": "2026-04-30",
+    "memo": ""
+  }
 }
